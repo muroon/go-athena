@@ -1,0 +1,11 @@
+version: '3.7'
+services:
+  app:
+    build: .
+    volumes:
+      - .:/go/src/github.com/speee/go-athena
+      - go-pkg-mod:/go/pkg/mod
+      - root-cache:/root/.cache
+volumes:
+  go-pkg-mod:
+  root-cache:
