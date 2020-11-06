@@ -1,0 +1,11 @@
+#!/bin/sh
+
+set -e
+
+ROOT_DIR=$(cd $(dirname $0)/..; pwd)
+
+if [ -n ${AWS_PROFILE} ]; then
+  CONTAINER_OPTIONS="${CONTAINER_OPTIONS} -e AWS_PROFILE=${AWS_PROFILE}"
+fi
+
+docker-compose ${COMPOSE_OPTIONS} run --rm ${CONTAINER_OPTIONS} app "$@"
