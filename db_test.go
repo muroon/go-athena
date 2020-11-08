@@ -34,6 +34,7 @@ func init() {
 	}
 }
 
+// TestQuery test for Query
 func TestQuery(t *testing.T) {
 	harness := setup(t)
 	// defer harness.teardown()
