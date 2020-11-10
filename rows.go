@@ -1,10 +1,13 @@
 package athena
 
 import (
+	"context"
 	"database/sql/driver"
 	"io"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/athena"
 	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
 )
@@ -12,16 +15,31 @@ import (
 type rows struct {
 	athena  athenaiface.AthenaAPI
 	queryID string
+	mode mode
 
+	// use only api mode
 	done          bool
 	skipHeaderRow bool
 	out           *athena.GetQueryResultsOutput
+
+	// use only download mode
+	downloadedRows *downloadedRows
 }
 
 type rowsConfig struct {
 	Athena     athenaiface.AthenaAPI
 	QueryID    string
 	SkipHeader bool
+	Mode       mode
+	Session    *session.Session
+	OutputLocation string
+	Timeout uint
+}
+
+type downloadedRows struct {
+	cursor int
+	header []string
+	data [][]string
 }
 
 func newRows(cfg rowsConfig) (*rows, error) {
@@ -29,6 +47,34 @@ func newRows(cfg rowsConfig) (*rows, error) {
 		athena:        cfg.Athena,
 		queryID:       cfg.QueryID,
 		skipHeaderRow: cfg.SkipHeader,
+		mode:       cfg.Mode,
+	}
+
+	if r.isDownload() {
+		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.Timeout) * time.Second)
+		defer cancel()
+
+		err := make(chan error, 2)
+
+		// download and set in memory
+		go r.downloadCsvAsync(ctx, err, cfg.Session, cfg.OutputLocation)
+
+		// get table metadata
+		go r.getQueryResultsAsyncForCsv(ctx, err)
+
+		for i := 0; i < 2; i++ {
+			select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case e := <-err:
+					if e != nil {
+						return nil, e
+					}
+			}
+		}
+
+		return &r, nil
 	}
 
 	shouldContinue, err := r.fetchNextPage(nil)
@@ -42,6 +88,11 @@ func newRows(cfg rowsConfig) (*rows, error) {
 
 func (r *rows) Columns() []string {
 	var columns []string
+
+	if r.isDownload() {
+		return r.downloadedRows.header
+	}
+
 	for _, colInfo := range r.out.ResultSet.ResultSetMetadata.ColumnInfo {
 		columns = append(columns, *colInfo.Name)
 	}
@@ -58,6 +109,20 @@ func (r *rows) ColumnTypeDatabaseTypeName(index int) string {
 }
 
 func (r *rows) Next(dest []driver.Value) error {
+	if r.isDownload() {
+		if r.downloadedRows.cursor >= len(r.downloadedRows.data) {
+			return io.EOF
+		}
+		row := r.downloadedRows.data[r.downloadedRows.cursor]
+		columns := r.out.ResultSet.ResultSetMetadata.ColumnInfo
+		if err := convertRowFromCsv(columns, row, dest); err != nil {
+			return err
+		}
+
+		r.downloadedRows.cursor++
+		return nil
+	}
+
 	if r.done {
 		return io.EOF
 	}

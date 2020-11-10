@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +19,21 @@ import (
 var (
 	openFromSessionMutex sync.Mutex
 	openFromSessionCount int
+)
+
+const (
+	// timeOutLimitDefault athena's timeout limit
+	timeOutLimitDefault uint = 1800
+)
+
+type mode int
+
+const (
+	// modeAPI api access mode
+	modeAPI mode = 0
+
+	// modeDownload download results mode
+	modeDownload mode = 1
 )
 
 // Driver is a sql.Driver. It's intended for db/sql.Open().
@@ -80,6 +97,9 @@ func (d *Driver) Open(connStr string) (driver.Conn, error) {
 		db:             cfg.Database,
 		OutputLocation: cfg.OutputLocation,
 		pollFrequency:  cfg.PollFrequency,
+		mode:           cfg.Mode,
+		session:        cfg.Session,
+		timeout:        cfg.Timeout,
 	}, nil
 }
 
@@ -117,6 +137,9 @@ type Config struct {
 	OutputLocation string
 
 	PollFrequency time.Duration
+
+	Mode          mode
+	Timeout       uint
 }
 
 func configFromConnectionString(connStr string) (*Config, error) {
@@ -144,6 +167,19 @@ func configFromConnectionString(connStr string) (*Config, error) {
 		cfg.PollFrequency, err = time.ParseDuration(frequencyStr)
 		if err != nil {
 			return nil, fmt.Errorf("invalid poll_frequency parameter: %s", frequencyStr)
+		}
+	}
+
+	cfg.Mode = modeAPI
+	modeValue := strings.ToLower(args.Get("mode"))
+	if modeValue == "dl" || modeValue == "download" {
+		cfg.Mode = modeDownload
+	}
+
+	cfg.Timeout = timeOutLimitDefault
+	if tm := args.Get("timeout"); tm != "" {
+		if timeout, err := strconv.ParseUint(tm, 10, 32); err != nil {
+			cfg.Timeout = uint(timeout)
 		}
 	}
 

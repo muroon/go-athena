@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/athena"
 	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
+	"github.com/aws/aws-sdk-go/aws/session"
 )
 
 type conn struct {
@@ -17,6 +18,10 @@ type conn struct {
 	OutputLocation string
 
 	pollFrequency time.Duration
+
+	mode mode
+	session *session.Session
+	timeout uint
 }
 
 func (c *conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
@@ -52,6 +57,10 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 		QueryID: queryID,
 		// todo add check for ddl queries to not skip header(#10)
 		SkipHeader: true,
+		Mode:       c.mode,
+		Session:    c.session,
+		OutputLocation: c.OutputLocation,
+		Timeout: c.timeout,
 	})
 }
 
