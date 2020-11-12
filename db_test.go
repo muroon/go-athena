@@ -131,6 +131,8 @@ func TestDDLQuery(t *testing.T) {
 	defer harness.teardown()
 
 	rows := harness.mustQuery("show tables")
+	defer rows.Close()
+	require.NoError(t, rows.Err())
 
 	output := make([]string, 0)
 	for rows.Next() {
