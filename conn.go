@@ -12,6 +12,12 @@ import (
 	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
 )
 
+const HOGE int = 1
+
+type Hoge struct {
+	ID int
+}
+
 type conn struct {
 	athena         athenaiface.AthenaAPI
 	db             string
