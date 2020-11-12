@@ -53,11 +53,17 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 		return nil, err
 	}
 
+	isDDL := isDDLQuery(query)
+	mode := c.mode
+	if isDDL {
+		mode = modeAPI
+	}
+
 	return newRows(rowsConfig{
 		Athena:     c.athena,
 		QueryID:    queryID,
-		SkipHeader: isDDLQuery(query),
-		Mode:       c.mode,
+		SkipHeader: isDDL,
+		Mode:       mode,
 		Session:    c.session,
 		OutputLocation: c.OutputLocation,
 		Timeout: c.timeout,
