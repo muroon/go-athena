@@ -20,7 +20,7 @@ type conn struct {
 
 	pollFrequency time.Duration
 
-	mode mode
+	mode Mode
 	session *session.Session
 	timeout uint
 }
@@ -56,7 +56,7 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 	isDDL := isDDLQuery(query)
 	mode := c.mode
 	if isDDL {
-		mode = modeAPI
+		mode = ModeAPI
 	}
 
 	return newRows(rowsConfig{

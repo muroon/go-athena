@@ -15,7 +15,7 @@ import (
 
 
 func (r *rows) isDownload() bool {
-	return r.mode == modeDownload
+	return r.mode == ModeDownload
 }
 
 func (r *rows) downloadCsvAsync(

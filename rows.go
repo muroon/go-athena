@@ -15,7 +15,7 @@ import (
 type rows struct {
 	athena  athenaiface.AthenaAPI
 	queryID string
-	mode mode
+	mode Mode
 
 	// use only api mode
 	done          bool
@@ -30,7 +30,7 @@ type rowsConfig struct {
 	Athena     athenaiface.AthenaAPI
 	QueryID    string
 	SkipHeader bool
-	Mode       mode
+	Mode       Mode
 	Session    *session.Session
 	OutputLocation string
 	Timeout uint

@@ -26,14 +26,15 @@ const (
 	timeOutLimitDefault uint = 1800
 )
 
-type mode int
+// Mode Results mode
+type Mode int
 
 const (
-	// modeAPI api access mode
-	modeAPI mode = 0
+	// ModeAPI api access Mode
+	ModeAPI Mode = 0
 
-	// modeDownload download results mode
-	modeDownload mode = 1
+	// ModeDownload download results Mode
+	ModeDownload Mode = 1
 )
 
 // Driver is a sql.Driver. It's intended for db/sql.Open().
@@ -138,7 +139,7 @@ type Config struct {
 
 	PollFrequency time.Duration
 
-	Mode          mode
+	Mode          Mode
 	Timeout       uint
 }
 
@@ -170,10 +171,10 @@ func configFromConnectionString(connStr string) (*Config, error) {
 		}
 	}
 
-	cfg.Mode = modeAPI
+	cfg.Mode = ModeAPI
 	modeValue := strings.ToLower(args.Get("mode"))
 	if modeValue == "dl" || modeValue == "download" {
-		cfg.Mode = modeDownload
+		cfg.Mode = ModeDownload
 	}
 
 	cfg.Timeout = timeOutLimitDefault
