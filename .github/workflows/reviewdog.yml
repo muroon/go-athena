@@ -16,7 +16,7 @@ jobs:
           github_token: ${{ secrets.github_token }}
           # Can pass --config flag to change golangci-lint behavior and target
           # directory.
-          golangci_lint_flags: "--enable-all --exclude-use-default=false"
+          golangci_lint_flags: "--enable-all --exclude-use-default=false -D wsl -D testpackage --test=false"
 
   # Use golint via golangci-lint binary with "warning" level.
   golint:
@@ -29,6 +29,6 @@ jobs:
         uses: reviewdog/action-golangci-lint@v1
         with:
           github_token: ${{ secrets.github_token }}
-          golangci_lint_flags: "--disable-all -E golint"
+          golangci_lint_flags: "--disable-all -E golint --test=false"
           tool_name: golint # Change reporter name.
           level: warning # GitHub Status Check won't become failure with this level.

@@ -126,6 +126,27 @@ func TestOpen(t *testing.T) {
 	require.NoError(t, err, "Query")
 }
 
+func TestDDLQuery(t *testing.T) {
+	harness := setup(t)
+	defer harness.teardown()
+
+	rows := harness.mustQuery("show tables")
+	defer rows.Close()
+	require.NoError(t, rows.Err())
+
+	output := make([]string, 0)
+	for rows.Next() {
+		var table string
+
+		err := rows.Scan(&table)
+		assert.NoError(t, err, "rows.Scan()")
+
+		output = append(output, table)
+	}
+
+	assert.Equal(t, 1, len(output), "query output")
+}
+
 type dummyRow struct {
 	NullValue     *struct{}       `json:"nullValue"`
 	SmallintType  int             `json:"smallintType"`
@@ -162,7 +183,7 @@ func setup(t *testing.T) *athenaHarness {
 
 func (a *athenaHarness) setupTable() {
 	// tables cannot start with numbers or contain dashes
-	id, _ := uuid.NewV4()
+	id := uuid.NewV4()
 	a.table = "t_" + strings.Replace(id.String(), "-", "_", -1)
 	a.mustExec(`CREATE EXTERNAL TABLE %[1]s (
 	nullValue string,
