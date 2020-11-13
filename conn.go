@@ -51,7 +51,7 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 	return newRows(rowsConfig{
 		Athena:     c.athena,
 		QueryID:    queryID,
-		SkipHeader: isDDLQuery(query),
+		SkipHeader: !isDDLQuery(query),
 	})
 }
 
