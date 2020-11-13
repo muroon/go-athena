@@ -29,6 +29,19 @@ func convertRow(columns []*athena.ColumnInfo, in []*athena.Datum, ret []driver.V
 	return nil
 }
 
+func convertRowFromTableInfo(columns []*athena.Column, in []string, ret []driver.Value) error {
+	for i, val := range in {
+		coerced, err := convertValue(*columns[i].Type, &val)
+		if err != nil {
+			return err
+		}
+
+		ret[i] = coerced
+	}
+
+	return nil
+}
+
 func convertRowFromCsv(columns []*athena.ColumnInfo, in []string, ret []driver.Value) error {
 	for i, val := range in {
 		coerced, err := convertValue(*columns[i].Type, &val)
