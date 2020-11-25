@@ -13,7 +13,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	uuid "github.com/satori/go.uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,6 +22,7 @@ import (
 var (
 	AthenaDatabase = "go_athena_tests"
 	S3Bucket       = "go-athena-tests"
+	AwsRegion      =  "us-east-1"
 )
 
 func init() {
@@ -32,11 +33,18 @@ func init() {
 	if v := os.Getenv("S3_BUCKET"); v != "" {
 		S3Bucket = v
 	}
+
+	if v := os.Getenv("AWS_DEFAULT_REGION"); v != "" {
+		AwsRegion = v
+	}
+	if v := os.Getenv("ATHENA_REGION"); v != "" {
+		AwsRegion = v
+	}
 }
 
 func TestQuery(t *testing.T) {
 	harness := setup(t)
-	// defer harness.teardown()
+	defer harness.teardown()
 
 	expected := []dummyRow{
 		{
@@ -115,8 +123,13 @@ func TestQuery(t *testing.T) {
 }
 
 func TestOpen(t *testing.T) {
+	var acfg []*aws.Config
+	acfg = append(acfg, &aws.Config{Region: aws.String(AwsRegion)})
+	session, err := session.NewSession(acfg...)
+	require.NoError(t, err, "Query")
+
 	db, err := Open(Config{
-		Session:        session.Must(session.NewSession()),
+		Session:        session,
 		Database:       AthenaDatabase,
 		OutputLocation: fmt.Sprintf("s3://%s/noop", S3Bucket),
 	})
@@ -164,16 +177,23 @@ type dummyRow struct {
 type athenaHarness struct {
 	t  *testing.T
 	db *sql.DB
-	s3 *s3.S3
+	sess *session.Session
 
 	table string
 }
 
 func setup(t *testing.T) *athenaHarness {
-	harness := athenaHarness{t: t, s3: s3.New(session.New())}
+	var acfg []*aws.Config
+	acfg = append(acfg, &aws.Config{
+		Region: aws.String(AwsRegion),
+	})
+	sess, err := session.NewSession(acfg...)
+	if err != nil {
+		require.NoError(t, err)
+	}
+	harness := athenaHarness{t: t, sess: sess}
 
-	var err error
-	harness.db, err = sql.Open("athena", fmt.Sprintf("db=%s&output_location=s3://%s/output", AthenaDatabase, S3Bucket))
+	harness.db, err = sql.Open("athena", fmt.Sprintf("db=%s&output_location=s3://%s/output&region=%s", AthenaDatabase, S3Bucket, AwsRegion))
 	require.NoError(t, err)
 
 	harness.setupTable()
@@ -230,7 +250,9 @@ func (a *athenaHarness) uploadData(rows []dummyRow) {
 		require.NoError(a.t, err)
 	}
 
-	_, err := a.s3.PutObject(&s3.PutObjectInput{
+	uploader := s3manager.NewUploader(a.sess)
+
+	_, err := uploader.Upload(&s3manager.UploadInput{
 		Bucket: aws.String(S3Bucket),
 		Key:    aws.String(fmt.Sprintf("%s/fixture.json", a.table)),
 		Body:   bytes.NewReader(buf.Bytes()),
