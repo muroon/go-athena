@@ -60,11 +60,15 @@ func convertValue(athenaType string, rawValue *string) (interface{}, error) {
 		return nil, nil
 	}
 
+	if len(athenaType) > 7 && athenaType[:7] == "decimal" {
+		athenaType = "decimal"
+	}
+
 	val := *rawValue
 	switch athenaType {
 	case "smallint":
 		return strconv.ParseInt(val, 10, 16)
-	case "integer":
+	case "integer", "int":
 		return strconv.ParseInt(val, 10, 32)
 	case "bigint":
 		return strconv.ParseInt(val, 10, 64)
