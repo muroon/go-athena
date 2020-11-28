@@ -16,6 +16,8 @@ const (
 	DateLayout                  = "2006-01-02"
 )
 
+const nullStringResultModeGzipDL string = "\\N"
+
 func convertRow(columns []*athena.ColumnInfo, in []*athena.Datum, ret []driver.Value) error {
 	for i, val := range in {
 		coerced, err := convertValue(*columns[i].Type, val.VarCharValue)
@@ -31,7 +33,14 @@ func convertRow(columns []*athena.ColumnInfo, in []*athena.Datum, ret []driver.V
 
 func convertRowFromTableInfo(columns []*athena.Column, in []string, ret []driver.Value) error {
 	for i, val := range in {
-		coerced, err := convertValue(*columns[i].Type, &val)
+		var coerced interface{}
+		var err error
+		if val == nullStringResultModeGzipDL {
+			var nullVal *string
+			coerced, err = convertValue(*columns[i].Type, nullVal)
+		} else {
+			coerced, err = convertValue(*columns[i].Type, &val)
+		}
 		if err != nil {
 			return err
 		}
