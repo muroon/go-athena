@@ -42,6 +42,19 @@ If a method must be supplied to satisfy a standard library interface but is unsu
 the driver will **panic** indicating so. If there are new offerings in Athena and/or
 helpful additions, feel free to PR.
 
+## Result Mode
+
+go-athena has the following modes to get the result of the query.
+
+- API (default)
+- DL
+- GZIP DL
+
+Note
+
+- DL and GZIP DL Mode are used only in the Select statement.
+  - Other statements automatically use API mode under DL or GZIP DL Mode.
+- Detailed explanation is described [here](doc/result_mode.md).
 
 ## Testing
 
