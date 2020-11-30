@@ -78,7 +78,7 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 	if isSelect && resultMode == ResultModeGzipDL {
 		// Create AS Select
 		ctasTable = fmt.Sprintf("tmp_ctas_%v", strings.Replace(uuid.NewV4().String(), "-", "", -1))
-		query = fmt.Sprintf("CREATE TABLE %s WITH (format='TEXTFILE', field_delimiter = ',') AS %s", ctasTable, query)
+		query = fmt.Sprintf("CREATE TABLE %s WITH (format='TEXTFILE') AS %s", ctasTable, query)
 		afterDownload = c.dropCTASTable(ctx, ctasTable)
 	}
 

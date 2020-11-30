@@ -1,13 +1,12 @@
 package athena
 
 import (
-	"bytes"
+	"bufio"
 	"compress/gzip"
 	"context"
 	"database/sql/driver"
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/client"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/athena"
 	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
@@ -16,6 +15,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -109,16 +109,10 @@ func (r *rowsGzipDL) downloadCompressedData(sess *session.Session, location stri
 		return err
 	}
 
-	bfData := buff.Bytes()
-	datas, err := getAsCsv(bfData)
+	start := len(location)+1 // the path is "location/objectKey"
+	objectKeys, err := getObjectKeysForGzip(strings.NewReader(string(buff.Bytes())), start)
 	if err != nil {
 		return err
-	}
-
-	objectKeys := make([]string, 0, len(datas))
-	for _, d := range datas {
-		objectKey := d[0][len(location)+1:]
-		objectKeys = append(objectKeys, objectKey)
 	}
 
 	for _, objectKey := range objectKeys {
@@ -139,16 +133,13 @@ func (r *rowsGzipDL) downloadCompressedData(sess *session.Session, location stri
 		if err != nil {
 			return err
 		}
-		output := bytes.Buffer{}
-		output.ReadFrom(gzipReader)
 
-		datas, err := getAsCsv(output.Bytes())
+		datas, err := getRecordsFromGzip(gzipReader)
 		if err != nil {
 			return err
 		}
 		if r.downloadedRows == nil {
 			r.downloadedRows = &downloadedRows{
-				header: datas[0],
 				data: make([][]string, 0, len(datas)* len(objectKeys)),
 			}
 		}
@@ -195,33 +186,6 @@ func (r *rowsGzipDL) columnTypeDatabaseTypeNameForCTAS(index int) string {
 	return *column.Type
 }
 
-	func getGZPaths(sess client.ConfigProvider, bucket, queryID string) ([]string, error) {
-	gzFilePaths := make([]string, 0)
-
-	svc := s3.New(sess)
-
-	prefix := fmt.Sprintf("tables/%s", queryID)
-	params := &s3.ListObjectsV2Input{
-		Bucket: &bucket,
-		Prefix: &prefix,
-	}
-
-	err := svc.ListObjectsV2Pages(params,
-		func(page *s3.ListObjectsV2Output, lastPage bool) bool {
-			for _, obj := range page.Contents {
-				objKey := *obj.Key
-				start := len(objKey)-3
-				if objKey[start:] == ".gz" {
-					gzFilePaths = append(gzFilePaths, objKey)
-				}
-			}
-
-			return *page.IsTruncated
-		})
-
-	return gzFilePaths, err
-}
-
 func (r *rowsGzipDL) Columns() []string {
 	var columns []string
 
@@ -242,4 +206,58 @@ func (r *rowsGzipDL) Next(dest []driver.Value) error {
 
 func (r *rowsGzipDL) Close() error {
 	return nil
+}
+
+func getObjectKeysForGzip(reader io.Reader, start int) ([]string, error) {
+
+	keys := make([]string, 0)
+	scanner := bufio.NewScanner(reader)
+
+	// read line by line
+	for scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return nil, err
+		}
+		k := scanner.Text()
+		if start > 0 && len(k) > start {
+			k = k[start:]
+		}
+		keys = append(keys, k)
+	}
+
+	return keys, nil
+}
+
+func getRecordsFromGzip(reader io.Reader) ([][]string, error) {
+	records := make([][]string, 0)
+
+	scanner := bufio.NewScanner(reader)
+
+	// read line by line
+	for scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return nil, err
+		}
+		b := scanner.Bytes()
+		field := ""
+		record := make([]string, 0)
+		for {
+			r, width := utf8.DecodeRune(b)
+			if r == '\001' {
+				record = append(record, field)
+				field = ""
+			} else {
+				field += string(r)
+			}
+			if width >= len(b) {
+				record = append(record, field)
+				break
+			}
+			b = b[width:]
+		}
+
+		records = append(records, record)
+	}
+
+	return records, nil
 }
