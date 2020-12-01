@@ -110,40 +110,21 @@ func TestQuery(t *testing.T) {
 		for rows.Next() {
 			index++
 
-			var nullValue string
 			var row dummyRow
-			if resultMode, ok := getResultMode(ctx); ok && resultMode == ResultModeDL {
-				// TODO: cannot convert nullable in ResultModeDL
-				require.NoError(t, rows.Scan(
-					&nullValue,
+			require.NoError(t, rows.Scan(
+				&row.NullValue,
 
-					&row.SmallintType,
-					&row.IntType,
-					&row.BigintType,
-					&row.BooleanType,
-					&row.FloatType,
-					&row.DoubleType,
-					&row.StringType,
-					&row.TimestampType,
-					&row.DateType,
-					&row.DecimalType,
-				))
-			} else {
-				require.NoError(t, rows.Scan(
-					&row.NullValue,
-
-					&row.SmallintType,
-					&row.IntType,
-					&row.BigintType,
-					&row.BooleanType,
-					&row.FloatType,
-					&row.DoubleType,
-					&row.StringType,
-					&row.TimestampType,
-					&row.DateType,
-					&row.DecimalType,
-				))
-			}
+				&row.SmallintType,
+				&row.IntType,
+				&row.BigintType,
+				&row.BooleanType,
+				&row.FloatType,
+				&row.DoubleType,
+				&row.StringType,
+				&row.TimestampType,
+				&row.DateType,
+				&row.DecimalType,
+			))
 
 			assert.Equal(t, expected[index], row, fmt.Sprintf("resultMode:%v, index: %d", resultMode, index))
 

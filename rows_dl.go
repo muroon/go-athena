@@ -1,6 +1,7 @@
 package athena
 
 import (
+	"bufio"
 	"context"
 	"database/sql/driver"
 	"fmt"
@@ -11,7 +12,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"io"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type rowsDL struct {
@@ -84,13 +87,12 @@ func (r *rowsDL) downloadCsv(sess *session.Session, location string) error {
 
 	bfData := buff.Bytes()
 
-	datas, err := getAsCsv(bfData)
+	fields, err := getRecordsForDL(strings.NewReader(string(bfData)))
 	if err != nil {
 		return err
 	}
 	r.downloadedRows = &downloadedRows{
-		header: datas[0],
-		data: datas[1:],
+		field: fields[1:],
 	}
 
 	return nil
@@ -106,10 +108,10 @@ func (r *rowsDL) getQueryResultsAsyncForCsv(ctx context.Context, errCh chan erro
 }
 
 func (r *rowsDL) nextDownload(dest []driver.Value) error {
-	if r.downloadedRows.cursor >= len(r.downloadedRows.data) {
+	if r.downloadedRows.cursor >= len(r.downloadedRows.field) {
 		return io.EOF
 	}
-	row := r.downloadedRows.data[r.downloadedRows.cursor]
+	row := r.downloadedRows.field[r.downloadedRows.cursor]
 	columns := r.out.ResultSet.ResultSetMetadata.ColumnInfo
 	if err := convertRowFromCsv(columns, row, dest); err != nil {
 		return err
@@ -120,7 +122,12 @@ func (r *rowsDL) nextDownload(dest []driver.Value) error {
 }
 
 func (r *rowsDL) Columns() []string {
-	return r.downloadedRows.header
+	var columns []string
+	for _, colInfo := range r.out.ResultSet.ResultSetMetadata.ColumnInfo {
+		columns = append(columns, *colInfo.Name)
+	}
+
+	return columns
 }
 
 func (r *rowsDL) ColumnTypeDatabaseTypeName(index int) string {
@@ -137,4 +144,71 @@ func (r *rowsDL) Next(dest []driver.Value) error {
 
 func (r *rowsDL) Close() error {
 	return nil
+}
+
+func getRecordsForDL(reader io.Reader) ([][]downloadField, error) {
+	records := make([][]downloadField, 0)
+
+	scanner := bufio.NewScanner(reader)
+
+	// read line by line
+	for scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return nil, err
+		}
+		b := scanner.Bytes()
+		useDoubleQuote := false
+		delimiter := false
+		field := ""
+		record := make([]downloadField, 0)
+		for {
+			r, width := utf8.DecodeRune(b)
+			if len(field) == 0 {
+				useDoubleQuote = r == '"'
+			}
+
+			if r == ',' {
+				delimiter = true
+				if useDoubleQuote {
+					delimiter = false
+					if len(field) > 0 && field[len(field)-1:] == string('"') {
+						field = field[1:len(field)-1]
+						delimiter = true
+					}
+				}
+			}
+
+			if delimiter {
+				isNil := !useDoubleQuote && len(field) == 0
+				row := downloadField{
+					isNil: isNil,
+					val: field,
+				}
+				record = append(record, row)
+				field = ""
+				delimiter = false
+			} else {
+				field += string(r)
+			}
+			if width >= len(b) {
+				if useDoubleQuote {
+					if len(field) > 0 && field[len(field)-1:] == string('"') {
+						field = field[1:len(field)-1]
+					}
+				}
+				isNil := !useDoubleQuote && len(field) == 0
+				row := downloadField{
+					isNil: isNil,
+					val: field,
+				}
+				record = append(record, row)
+				break
+			}
+			b = b[width:]
+		}
+
+		records = append(records, record)
+	}
+
+	return records, nil
 }

@@ -51,9 +51,16 @@ func convertRowFromTableInfo(columns []*athena.Column, in []string, ret []driver
 	return nil
 }
 
-func convertRowFromCsv(columns []*athena.ColumnInfo, in []string, ret []driver.Value) error {
-	for i, val := range in {
-		coerced, err := convertValue(*columns[i].Type, &val)
+func convertRowFromCsv(columns []*athena.ColumnInfo, in []downloadField, ret []driver.Value) error {
+	for i, df := range in {
+		var coerced interface{}
+		var err error
+		if df.isNil {
+			var nullVal *string
+			coerced, err = convertValue(*columns[i].Type, nullVal)
+		} else {
+			coerced, err = convertValue(*columns[i].Type, &df.val)
+		}
 		if err != nil {
 			return err
 		}
