@@ -55,6 +55,7 @@ Note
 - DL and GZIP DL Mode are used only in the Select statement.
   - Other statements automatically use API mode under DL or GZIP DL Mode.
 - Detailed explanation is described [here](doc/result_mode.md).
+- [Usages of Result Mode](doc/result_mode.md#usages).
 
 ## Testing
 

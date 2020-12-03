@@ -176,7 +176,7 @@ func configFromConnectionString(connStr string) (*Config, error) {
 	}
 
 	cfg.ResultMode = ResultModeAPI
-	modeValue := strings.ToLower(args.Get("mode"))
+	modeValue := strings.ToLower(args.Get("result_mode"))
 	switch {
 	case modeValue == "dl" || modeValue == "download":
 		cfg.ResultMode = ResultModeDL

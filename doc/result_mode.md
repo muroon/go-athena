@@ -64,3 +64,31 @@ It is a comparison of the time taken from executing the query in the actual resu
 I think the following trends can be said.
 - DL mode and API mode are effective for a small number of cases
 - GZIP DL mode is very effective for a large number of cases
+
+## Usages
+
+### Setting in Configuration
+
+```
+# DL Mode
+db, err := sql.Open("athena", "db=xxxx&output_location=s3://xxxxxxx&region=xxxxxx&result_mode=dl")
+
+# GZIP DL Mode
+db, err := sql.Open("athena", "db=xxxx&output_location=s3://xxxxxxx&region=xxxxxx&result_mode=gzip")
+```
+
+### Setting in Context
+
+You can change the Result Mode for each SQL.
+Settings in context override Configuration settings.
+
+```
+# API Mode
+ctx = SetAPIMode(ctx)
+
+# DL Mode
+ctx = SetDLMode(ctx)
+
+# GZIP DL Mode
+ctx = SetGzipDLMode(ctx)
+```
