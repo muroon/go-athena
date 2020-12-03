@@ -138,9 +138,9 @@ type Config struct {
 
 	PollFrequency time.Duration
 
-	ResultMode    ResultMode
-	Timeout       uint
-	Catalog       string
+	ResultMode ResultMode
+	Timeout    uint
+	Catalog    string
 }
 
 func configFromConnectionString(connStr string) (*Config, error) {

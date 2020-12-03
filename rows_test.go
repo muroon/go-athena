@@ -246,32 +246,32 @@ func Test_getRecordsForDL(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "test",
+			name:  "test",
 			param: ",\"1\"\n\"\",\"9\"\n\"hoge, hoge\",\"10\"",
 			want: [][]downloadField{
-				[]downloadField{
-					downloadField{
+				{
+					{
 						isNil: true,
 					},
-					downloadField{
+					{
 						val: "1",
 					},
 				},
-				[]downloadField{
-					downloadField{
+				{
+					{
 						isNil: false,
 						val:   "",
 					},
-					downloadField{
+					{
 						val: "9",
 					},
 				},
-				[]downloadField{
-					downloadField{
+				{
+					{
 						isNil: false,
 						val:   "hoge, hoge",
 					},
-					downloadField{
+					{
 						val: "10",
 					},
 				},

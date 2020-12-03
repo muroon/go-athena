@@ -23,28 +23,28 @@ const (
 )
 
 type rowsGzipDL struct {
-	athena  athenaiface.AthenaAPI
-	queryID string
+	athena     athenaiface.AthenaAPI
+	queryID    string
 	resultMode ResultMode
 
 	// use download
 	downloadedRows *downloadedRows
 
 	// ctas table
-	ctasTable string
-	db        string
-	catalog   string
+	ctasTable        string
+	db               string
+	catalog          string
 	ctasTableColumns []*athena.Column
 }
 
 func newRowsGzipDL(cfg rowsConfig) (*rowsGzipDL, error) {
 	r := &rowsGzipDL{
-		athena:        cfg.Athena,
-		queryID:       cfg.QueryID,
-		resultMode:    cfg.ResultMode,
-		ctasTable:     cfg.CTASTable,
-		db:            cfg.DB,
-		catalog:       cfg.Catalog,
+		athena:     cfg.Athena,
+		queryID:    cfg.QueryID,
+		resultMode: cfg.ResultMode,
+		ctasTable:  cfg.CTASTable,
+		db:         cfg.DB,
+		catalog:    cfg.Catalog,
 	}
 	err := r.init(cfg)
 	return r, err
@@ -52,7 +52,7 @@ func newRowsGzipDL(cfg rowsConfig) (*rowsGzipDL, error) {
 
 func (r *rowsGzipDL) init(cfg rowsConfig) error {
 	ctx := context.Background()
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.Timeout) * time.Second)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.Timeout)*time.Second)
 	defer cancel()
 
 	err := make(chan error, 2)
@@ -109,7 +109,7 @@ func (r *rowsGzipDL) downloadCompressedData(sess *session.Session, location stri
 		return err
 	}
 
-	start := len(location)+1 // the path is "location/objectKey"
+	start := len(location) + 1 // the path is "location/objectKey"
 	objectKeys, err := getObjectKeysForGzip(strings.NewReader(string(buff.Bytes())), start)
 	if err != nil {
 		return err
@@ -140,7 +140,7 @@ func (r *rowsGzipDL) downloadCompressedData(sess *session.Session, location stri
 		}
 		if r.downloadedRows == nil {
 			r.downloadedRows = &downloadedRows{
-				data: make([][]string, 0, len(datas)* len(objectKeys)),
+				data: make([][]string, 0, len(datas)*len(objectKeys)),
 			}
 		}
 		r.downloadedRows.data = append(r.downloadedRows.data, datas...)
@@ -151,9 +151,9 @@ func (r *rowsGzipDL) downloadCompressedData(sess *session.Session, location stri
 
 func (r *rowsGzipDL) getTableAsync(ctx context.Context, errCh chan error) {
 	data, err := r.athena.GetTableMetadata(&athena.GetTableMetadataInput{
-		CatalogName: aws.String(r.catalog),
+		CatalogName:  aws.String(r.catalog),
 		DatabaseName: aws.String(r.db),
-		TableName: aws.String(r.ctasTable),
+		TableName:    aws.String(r.ctasTable),
 	})
 	if err != nil {
 		errCh <- err

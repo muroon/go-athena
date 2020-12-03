@@ -26,9 +26,9 @@ type conn struct {
 	pollFrequency time.Duration
 
 	resultMode ResultMode
-	session *session.Session
-	timeout uint
-	catalog string
+	session    *session.Session
+	timeout    uint
+	catalog    string
 }
 
 func (c *conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
@@ -92,17 +92,17 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 	}
 
 	return newRows(rowsConfig{
-		Athena:     c.athena,
-		QueryID:    queryID,
-		SkipHeader: !isDDLQuery(query),
-		ResultMode: resultMode,
-		Session:    c.session,
+		Athena:         c.athena,
+		QueryID:        queryID,
+		SkipHeader:     !isDDLQuery(query),
+		ResultMode:     resultMode,
+		Session:        c.session,
 		OutputLocation: c.OutputLocation,
-		Timeout: timeout,
-		AfterDownload: afterDownload,
-		CTASTable: ctasTable,
-		DB: c.db,
-		Catalog: catalog,
+		Timeout:        timeout,
+		AfterDownload:  afterDownload,
+		CTASTable:      ctasTable,
+		DB:             c.db,
+		Catalog:        catalog,
 	})
 }
 

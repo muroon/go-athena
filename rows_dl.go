@@ -18,18 +18,18 @@ import (
 )
 
 type rowsDL struct {
-	athena  athenaiface.AthenaAPI
-	queryID string
-	resultMode ResultMode
-	out        *athena.GetQueryResultsOutput
+	athena         athenaiface.AthenaAPI
+	queryID        string
+	resultMode     ResultMode
+	out            *athena.GetQueryResultsOutput
 	downloadedRows *downloadedRows
 }
 
 func newRowsDL(cfg rowsConfig) (*rowsDL, error) {
 	r := &rowsDL{
-		athena:        cfg.Athena,
-		queryID:       cfg.QueryID,
-		resultMode:    cfg.ResultMode,
+		athena:     cfg.Athena,
+		queryID:    cfg.QueryID,
+		resultMode: cfg.ResultMode,
 	}
 	err := r.init(cfg)
 	return r, err
@@ -37,7 +37,7 @@ func newRowsDL(cfg rowsConfig) (*rowsDL, error) {
 
 func (r *rowsDL) init(cfg rowsConfig) error {
 	ctx := context.Background()
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.Timeout) * time.Second)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.Timeout)*time.Second)
 	defer cancel()
 
 	err := make(chan error, 2)
@@ -102,7 +102,7 @@ func (r *rowsDL) getQueryResultsAsyncForCsv(ctx context.Context, errCh chan erro
 	var err error
 	r.out, err = r.athena.GetQueryResults(&athena.GetQueryResultsInput{
 		QueryExecutionId: aws.String(r.queryID),
-		MaxResults: aws.Int64(1),
+		MaxResults:       aws.Int64(1),
 	})
 	errCh <- err
 }
@@ -172,7 +172,7 @@ func getRecordsForDL(reader io.Reader) ([][]downloadField, error) {
 				if useDoubleQuote {
 					delimiter = false
 					if len(field) > 0 && field[len(field)-1:] == string('"') {
-						field = field[1:len(field)-1]
+						field = field[1 : len(field)-1]
 						delimiter = true
 					}
 				}
@@ -182,7 +182,7 @@ func getRecordsForDL(reader io.Reader) ([][]downloadField, error) {
 				isNil := !useDoubleQuote && len(field) == 0
 				row := downloadField{
 					isNil: isNil,
-					val: field,
+					val:   field,
 				}
 				record = append(record, row)
 				field = ""
@@ -193,13 +193,13 @@ func getRecordsForDL(reader io.Reader) ([][]downloadField, error) {
 			if width >= len(b) {
 				if useDoubleQuote {
 					if len(field) > 0 && field[len(field)-1:] == string('"') {
-						field = field[1:len(field)-1]
+						field = field[1 : len(field)-1]
 					}
 				}
 				isNil := !useDoubleQuote && len(field) == 0
 				row := downloadField{
 					isNil: isNil,
-					val: field,
+					val:   field,
 				}
 				record = append(record, row)
 				break

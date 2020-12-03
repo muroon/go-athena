@@ -9,8 +9,8 @@ import (
 )
 
 type rowsAPI struct {
-	athena  athenaiface.AthenaAPI
-	queryID string
+	athena     athenaiface.AthenaAPI
+	queryID    string
 	resultMode ResultMode
 
 	// use only api mode

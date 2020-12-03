@@ -7,27 +7,27 @@ import (
 )
 
 type rowsConfig struct {
-	Athena     athenaiface.AthenaAPI
-	QueryID    string
-	SkipHeader bool
-	ResultMode ResultMode
-	Session    *session.Session
+	Athena         athenaiface.AthenaAPI
+	QueryID        string
+	SkipHeader     bool
+	ResultMode     ResultMode
+	Session        *session.Session
 	OutputLocation string
-	Timeout uint
-	AfterDownload func() error
-	CTASTable string
-	DB string
-	Catalog string
+	Timeout        uint
+	AfterDownload  func() error
+	CTASTable      string
+	DB             string
+	Catalog        string
 }
 
 type downloadedRows struct {
 	cursor int
-	data [][]string // for gzip dl
-	field [][]downloadField // for csv dl
+	data   [][]string        // for gzip dl
+	field  [][]downloadField // for csv dl
 }
 
 type downloadField struct {
-	val string
+	val   string
 	isNil bool
 }
 

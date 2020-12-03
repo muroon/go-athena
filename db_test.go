@@ -22,7 +22,7 @@ import (
 var (
 	AthenaDatabase = "go_athena_tests"
 	S3Bucket       = "go-athena-tests"
-	AwsRegion      =  "us-east-1"
+	AwsRegion      = "us-east-1"
 )
 
 func init() {
@@ -88,7 +88,7 @@ func TestQuery(t *testing.T) {
 	expectedTypeNameGzipDLs := []string{"string", "smallint", "int", "bigint", "boolean", "float", "double", "string", "timestamp", "date", "decimal(11,5)"}
 	harness.uploadData(expected)
 
-	resultModes := []ResultMode {
+	resultModes := []ResultMode{
 		ResultModeAPI,
 		ResultModeDL,
 		ResultModeGzipDL,
@@ -126,10 +126,10 @@ func TestQuery(t *testing.T) {
 				&row.DecimalType,
 			))
 
-			assert.Equal(t, expected[index], row, fmt.Sprintf("resultMode:%v, index: %d", resultMode, index))
+			assert.Equal(t, expected[index], row, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
 
 			types, err := rows.ColumnTypes()
-			assert.NoError(t, err, fmt.Sprintf("resultMode:%v, index: %d", resultMode, index))
+			assert.NoError(t, err, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
 
 			etns := expectedTypeNames
 			if resultMode == ResultModeGzipDL {
@@ -137,7 +137,7 @@ func TestQuery(t *testing.T) {
 			}
 			for i, colType := range types {
 				typeName := colType.DatabaseTypeName()
-				assert.Equal(t, etns[i], typeName, fmt.Sprintf("resultMode:%v, index: %d", resultMode, index))
+				assert.Equal(t, etns[i], typeName, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
 			}
 		}
 
@@ -152,7 +152,7 @@ func TestOpen(t *testing.T) {
 	session, err := session.NewSession(acfg...)
 	require.NoError(t, err, "Query")
 
-	resultModes := []ResultMode {
+	resultModes := []ResultMode{
 		ResultModeAPI,
 		ResultModeDL,
 		ResultModeGzipDL,
@@ -165,8 +165,8 @@ func TestOpen(t *testing.T) {
 			OutputLocation: fmt.Sprintf("s3://%s", S3Bucket),
 
 			ResultMode: resultMode,
-			WorkGroup: "primary",
-			Timeout: timeOutLimitDefault,
+			WorkGroup:  "primary",
+			Timeout:    timeOutLimitDefault,
 		})
 		require.NoError(t, err, fmt.Sprintf("Open. resultMode:%v", resultMode))
 
@@ -216,8 +216,8 @@ type dummyRow struct {
 }
 
 type athenaHarness struct {
-	t  *testing.T
-	db *sql.DB
+	t    *testing.T
+	db   *sql.DB
 	sess *session.Session
 
 	table string
