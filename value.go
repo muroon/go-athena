@@ -16,9 +16,51 @@ const (
 	DateLayout                  = "2006-01-02"
 )
 
+const nullStringResultModeGzipDL string = "\\N"
+
 func convertRow(columns []*athena.ColumnInfo, in []*athena.Datum, ret []driver.Value) error {
 	for i, val := range in {
 		coerced, err := convertValue(*columns[i].Type, val.VarCharValue)
+		if err != nil {
+			return err
+		}
+
+		ret[i] = coerced
+	}
+
+	return nil
+}
+
+func convertRowFromTableInfo(columns []*athena.Column, in []string, ret []driver.Value) error {
+	for i, val := range in {
+		var coerced interface{}
+		var err error
+		if val == nullStringResultModeGzipDL {
+			var nullVal *string
+			coerced, err = convertValue(*columns[i].Type, nullVal)
+		} else {
+			coerced, err = convertValue(*columns[i].Type, &val)
+		}
+		if err != nil {
+			return err
+		}
+
+		ret[i] = coerced
+	}
+
+	return nil
+}
+
+func convertRowFromCsv(columns []*athena.ColumnInfo, in []downloadField, ret []driver.Value) error {
+	for i, df := range in {
+		var coerced interface{}
+		var err error
+		if df.isNil {
+			var nullVal *string
+			coerced, err = convertValue(*columns[i].Type, nullVal)
+		} else {
+			coerced, err = convertValue(*columns[i].Type, &df.val)
+		}
 		if err != nil {
 			return err
 		}
@@ -34,11 +76,15 @@ func convertValue(athenaType string, rawValue *string) (interface{}, error) {
 		return nil, nil
 	}
 
+	if len(athenaType) > 7 && athenaType[:7] == "decimal" {
+		athenaType = "decimal"
+	}
+
 	val := *rawValue
 	switch athenaType {
 	case "smallint":
 		return strconv.ParseInt(val, 10, 16)
-	case "integer":
+	case "integer", "int":
 		return strconv.ParseInt(val, 10, 32)
 	case "bigint":
 		return strconv.ParseInt(val, 10, 64)

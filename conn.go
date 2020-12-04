@@ -4,10 +4,15 @@ import (
 	"context"
 	"database/sql/driver"
 	"errors"
+	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
+	uuid "github.com/satori/go.uuid"
+
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/athena"
 	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
 )
@@ -19,6 +24,11 @@ type conn struct {
 	workgroup      string
 
 	pollFrequency time.Duration
+
+	resultMode ResultMode
+	session    *session.Session
+	timeout    uint
+	catalog    string
 }
 
 func (c *conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
@@ -40,6 +50,38 @@ func (c *conn) ExecContext(ctx context.Context, query string, args []driver.Name
 }
 
 func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) {
+	// result mode
+	isSelect := isSelectQuery(query)
+	resultMode := c.resultMode
+	if rmode, ok := getResultMode(ctx); ok {
+		resultMode = rmode
+	}
+	if !isSelect {
+		resultMode = ResultModeAPI
+	}
+
+	// timeout
+	timeout := c.timeout
+	if to, ok := getTimeout(ctx); ok {
+		timeout = to
+	}
+
+	// catalog
+	catalog := c.catalog
+	if cat, ok := getCatalog(ctx); ok {
+		catalog = cat
+	}
+
+	// mode ctas
+	var ctasTable string
+	var afterDownload func() error
+	if isSelect && resultMode == ResultModeGzipDL {
+		// Create AS Select
+		ctasTable = fmt.Sprintf("tmp_ctas_%v", strings.Replace(uuid.NewV4().String(), "-", "", -1))
+		query = fmt.Sprintf("CREATE TABLE %s WITH (format='TEXTFILE') AS %s", ctasTable, query)
+		afterDownload = c.dropCTASTable(ctx, ctasTable)
+	}
+
 	queryID, err := c.startQuery(query)
 	if err != nil {
 		return nil, err
@@ -50,10 +92,31 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 	}
 
 	return newRows(rowsConfig{
-		Athena:     c.athena,
-		QueryID:    queryID,
-		SkipHeader: !isDDLQuery(query),
+		Athena:         c.athena,
+		QueryID:        queryID,
+		SkipHeader:     !isDDLQuery(query),
+		ResultMode:     resultMode,
+		Session:        c.session,
+		OutputLocation: c.OutputLocation,
+		Timeout:        timeout,
+		AfterDownload:  afterDownload,
+		CTASTable:      ctasTable,
+		DB:             c.db,
+		Catalog:        catalog,
 	})
+}
+
+func (c *conn) dropCTASTable(ctx context.Context, table string) func() error {
+	return func() error {
+		query := fmt.Sprintf("DROP TABLE %s", table)
+
+		queryID, err := c.startQuery(query)
+		if err != nil {
+			return err
+		}
+
+		return c.waitOnQuery(ctx, queryID)
+	}
 }
 
 // startQuery starts an Athena query and returns its ID.
@@ -145,4 +208,12 @@ var ddlQueryRegex = regexp.MustCompile(`(?i)^(ALTER|CREATE|DESCRIBE|DROP|MSCK|SH
 
 func isDDLQuery(query string) bool {
 	return ddlQueryRegex.Match([]byte(query))
+}
+
+func isSelectQuery(query string) bool {
+	return regexp.MustCompile(`(?i)^SELECT`).Match([]byte(query))
+}
+
+func isCTASQuery(query string) bool {
+	return regexp.MustCompile(`(?i)^CREATE.+AS\s+SELECT`).Match([]byte(query))
 }

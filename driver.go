@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +19,11 @@ import (
 var (
 	openFromSessionMutex sync.Mutex
 	openFromSessionCount int
+)
+
+const (
+	// timeOutLimitDefault athena's timeout limit
+	timeOutLimitDefault uint = 1800
 )
 
 // Driver is a sql.Driver. It's intended for db/sql.Open().
@@ -84,6 +91,10 @@ func (d *Driver) Open(connStr string) (driver.Conn, error) {
 		OutputLocation: cfg.OutputLocation,
 		pollFrequency:  cfg.PollFrequency,
 		workgroup:      cfg.WorkGroup,
+		resultMode:     cfg.ResultMode,
+		session:        cfg.Session,
+		timeout:        cfg.Timeout,
+		catalog:        cfg.Catalog,
 	}, nil
 }
 
@@ -126,6 +137,10 @@ type Config struct {
 	WorkGroup      string
 
 	PollFrequency time.Duration
+
+	ResultMode ResultMode
+	Timeout    uint
+	Catalog    string
 }
 
 func configFromConnectionString(connStr string) (*Config, error) {
@@ -158,6 +173,27 @@ func configFromConnectionString(connStr string) (*Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid poll_frequency parameter: %s", frequencyStr)
 		}
+	}
+
+	cfg.ResultMode = ResultModeAPI
+	modeValue := strings.ToLower(args.Get("result_mode"))
+	switch {
+	case modeValue == "dl" || modeValue == "download":
+		cfg.ResultMode = ResultModeDL
+	case modeValue == "gzip":
+		cfg.ResultMode = ResultModeGzipDL
+	}
+
+	cfg.Timeout = timeOutLimitDefault
+	if tm := args.Get("timeout"); tm != "" {
+		if timeout, err := strconv.ParseUint(tm, 10, 32); err != nil {
+			cfg.Timeout = uint(timeout)
+		}
+	}
+
+	cfg.Catalog = CATALOG_AWS_DATA_CATALOG
+	if ct := args.Get("catalog"); ct != "" {
+		cfg.Catalog = ct
 	}
 
 	return &cfg, nil

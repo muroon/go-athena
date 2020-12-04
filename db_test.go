@@ -22,7 +22,7 @@ import (
 var (
 	AthenaDatabase = "go_athena_tests"
 	S3Bucket       = "go-athena-tests"
-	AwsRegion      =  "us-east-1"
+	AwsRegion      = "us-east-1"
 )
 
 func init() {
@@ -85,41 +85,65 @@ func TestQuery(t *testing.T) {
 		},
 	}
 	expectedTypeNames := []string{"varchar", "smallint", "integer", "bigint", "boolean", "float", "double", "varchar", "timestamp", "date", "decimal"}
+	expectedTypeNameGzipDLs := []string{"string", "smallint", "int", "bigint", "boolean", "float", "double", "string", "timestamp", "date", "decimal(11,5)"}
 	harness.uploadData(expected)
 
-	rows := harness.mustQuery("select * from %s", harness.table)
-	index := -1
-	for rows.Next() {
-		index++
-
-		var row dummyRow
-		require.NoError(t, rows.Scan(
-			&row.NullValue,
-
-			&row.SmallintType,
-			&row.IntType,
-			&row.BigintType,
-			&row.BooleanType,
-			&row.FloatType,
-			&row.DoubleType,
-			&row.StringType,
-			&row.TimestampType,
-			&row.DateType,
-			&row.DecimalType,
-		))
-
-		assert.Equal(t, expected[index], row, fmt.Sprintf("index: %d", index))
-
-		types, err := rows.ColumnTypes()
-		assert.NoError(t, err, fmt.Sprintf("index: %d", index))
-		for i, colType := range types {
-			typeName := colType.DatabaseTypeName()
-			assert.Equal(t, expectedTypeNames[i], typeName, fmt.Sprintf("index: %d", index))
-		}
+	resultModes := []ResultMode{
+		ResultModeAPI,
+		ResultModeDL,
+		ResultModeGzipDL,
 	}
 
-	require.NoError(t, rows.Err(), "rows.Err()")
-	require.Equal(t, 3, index+1, "row count")
+	for _, resultMode := range resultModes {
+		ctx := context.Background()
+		switch resultMode {
+		case ResultModeAPI:
+			ctx = SetAPIMode(ctx)
+		case ResultModeDL:
+			ctx = SetDLMode(ctx)
+		case ResultModeGzipDL:
+			ctx = SetGzipDLMode(ctx)
+		}
+
+		rows := harness.mustQuery(ctx, "select * from %s", harness.table)
+		index := -1
+		for rows.Next() {
+			index++
+
+			var row dummyRow
+			require.NoError(t, rows.Scan(
+				&row.NullValue,
+
+				&row.SmallintType,
+				&row.IntType,
+				&row.BigintType,
+				&row.BooleanType,
+				&row.FloatType,
+				&row.DoubleType,
+				&row.StringType,
+				&row.TimestampType,
+				&row.DateType,
+				&row.DecimalType,
+			))
+
+			assert.Equal(t, expected[index], row, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
+
+			types, err := rows.ColumnTypes()
+			assert.NoError(t, err, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
+
+			etns := expectedTypeNames
+			if resultMode == ResultModeGzipDL {
+				etns = expectedTypeNameGzipDLs
+			}
+			for i, colType := range types {
+				typeName := colType.DatabaseTypeName()
+				assert.Equal(t, etns[i], typeName, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
+			}
+		}
+
+		require.NoError(t, rows.Err(), fmt.Sprintf("rows.Err(). resultMode:%v", resultMode))
+		require.Equal(t, 3, index+1, fmt.Sprintf("row count. resultMode:%v", resultMode))
+	}
 }
 
 func TestOpen(t *testing.T) {
@@ -128,22 +152,39 @@ func TestOpen(t *testing.T) {
 	session, err := session.NewSession(acfg...)
 	require.NoError(t, err, "Query")
 
-	db, err := Open(Config{
-		Session:        session,
-		Database:       AthenaDatabase,
-		OutputLocation: fmt.Sprintf("s3://%s/noop", S3Bucket),
-	})
-	require.NoError(t, err, "Open")
+	resultModes := []ResultMode{
+		ResultModeAPI,
+		ResultModeDL,
+		ResultModeGzipDL,
+	}
 
-	_, err = db.Query("SELECT 1")
-	require.NoError(t, err, "Query")
+	for _, resultMode := range resultModes {
+		db, err := Open(Config{
+			Session:        session,
+			Database:       AthenaDatabase,
+			OutputLocation: fmt.Sprintf("s3://%s", S3Bucket),
+
+			ResultMode: resultMode,
+			WorkGroup:  "primary",
+			Timeout:    timeOutLimitDefault,
+		})
+		require.NoError(t, err, fmt.Sprintf("Open. resultMode:%v", resultMode))
+
+		ctx := context.Background()
+		_, err = db.QueryContext(ctx, "SELECT 1")
+		if resultMode == ResultModeGzipDL {
+			require.Error(t, err, "Query IN Gzip DL Mode")
+		} else {
+			require.NoError(t, err, fmt.Sprintf("Query IN resultMode:%v", resultMode))
+		}
+	}
 }
 
 func TestDDLQuery(t *testing.T) {
 	harness := setup(t)
 	defer harness.teardown()
 
-	rows := harness.mustQuery("show tables")
+	rows := harness.mustQuery(context.Background(), "show tables")
 	defer rows.Close()
 	require.NoError(t, rows.Err())
 
@@ -175,8 +216,8 @@ type dummyRow struct {
 }
 
 type athenaHarness struct {
-	t  *testing.T
-	db *sql.DB
+	t    *testing.T
+	db   *sql.DB
 	sess *session.Session
 
 	table string
@@ -193,7 +234,7 @@ func setup(t *testing.T) *athenaHarness {
 	}
 	harness := athenaHarness{t: t, sess: sess}
 
-	harness.db, err = sql.Open("athena", fmt.Sprintf("db=%s&output_location=s3://%s/output&region=%s", AthenaDatabase, S3Bucket, AwsRegion))
+	harness.db, err = sql.Open("athena", fmt.Sprintf("db=%s&output_location=s3://%s&region=%s", AthenaDatabase, S3Bucket, AwsRegion))
 	require.NoError(t, err)
 
 	harness.setupTable()
@@ -222,7 +263,6 @@ ROW FORMAT SERDE 'org.openx.data.jsonserde.JsonSerDe'
 WITH SERDEPROPERTIES (
 	'serialization.format' = '1'
 ) LOCATION 's3://%[2]s/%[1]s/';`, a.table, S3Bucket)
-	fmt.Printf("created table: %s", a.table)
 }
 
 func (a *athenaHarness) teardown() {
@@ -235,9 +275,9 @@ func (a *athenaHarness) mustExec(sql string, args ...interface{}) {
 	require.NoError(a.t, err, query)
 }
 
-func (a *athenaHarness) mustQuery(sql string, args ...interface{}) *sql.Rows {
+func (a *athenaHarness) mustQuery(ctx context.Context, sql string, args ...interface{}) *sql.Rows {
 	query := fmt.Sprintf(sql, args...)
-	rows, err := a.db.QueryContext(context.TODO(), query)
+	rows, err := a.db.QueryContext(ctx, query)
 	require.NoError(a.t, err, query)
 	return rows
 }

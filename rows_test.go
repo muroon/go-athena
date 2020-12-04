@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"math/rand"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go/service/athena"
@@ -233,5 +234,65 @@ func TestRows_Next(t *testing.T) {
 		if test.expectedError == nil {
 			assert.Equal(t, test.expectedResultsSize, cnt)
 		}
+	}
+}
+
+func Test_getRecordsForDL(t *testing.T) {
+
+	tests := []struct {
+		name    string
+		param   string
+		want    [][]downloadField
+		wantErr bool
+	}{
+		{
+			name:  "test",
+			param: ",\"1\"\n\"\",\"9\"\n\"hoge, hoge\",\"10\"",
+			want: [][]downloadField{
+				{
+					{
+						isNil: true,
+					},
+					{
+						val: "1",
+					},
+				},
+				{
+					{
+						isNil: false,
+						val:   "",
+					},
+					{
+						val: "9",
+					},
+				},
+				{
+					{
+						isNil: false,
+						val:   "hoge, hoge",
+					},
+					{
+						val: "10",
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := getRecordsForDL(strings.NewReader(tt.param))
+			if (err != nil) != tt.wantErr {
+				t.Errorf("getRecordsForDL() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			for i, dfs := range got {
+				for j, df := range dfs {
+					want := tt.want[i][j]
+					if want != df {
+						t.Errorf("getRecordsForDL() expecte:%v, actual:%v", want, df)
+					}
+				}
+			}
+		})
 	}
 }
