@@ -2,7 +2,8 @@
 
 Initial release of go-athena by speee
 
-This was originally created by [another person](https://github.com/segmentio/go-athena), but it has not been maintained for nearly two years, so we decided to repair it. The following functions have been added, including importing some of the issues that were originally up.
+This is forked from [another project](https://github.com/segmentio/go-athena), which has not been maintained actively, and we started maintaining it instead.
+The following functions have been added, including importing some of the issues that were originally up.
 
 - Add Docker environment
 - Add linter by reviewdog
