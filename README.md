@@ -1,4 +1,7 @@
 [![](https://godoc.org/github.com/speee/go-athena?status.svg)](https://godoc.org/github.com/speee/go-athena)
+
+**This is forked from [segmentio/go-athena](https://github.com/segmentio/go-athena) and we described what changes we added [here](./doc/introduction.md).**
+
 # go-athena
 
 go-athena is a simple Golang [database/sql] driver for [Amazon Athena](https://aws.amazon.com/athena/).
