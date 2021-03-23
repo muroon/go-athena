@@ -2,10 +2,11 @@ package athena
 
 import (
 	"database/sql/driver"
+	"io"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/athena"
 	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
-	"io"
 )
 
 type rowsAPI struct {
@@ -67,6 +68,10 @@ func (r *rowsAPI) fetchNextPage(token *string) (bool, error) {
 }
 
 func (r *rowsAPI) nextAPI(dest []driver.Value) error {
+	if r.done {
+		return io.EOF
+	}
+
 	// If nothing left to iterate...
 	if len(r.out.ResultSet.Rows) == 0 {
 		// And if nothing more to paginate...

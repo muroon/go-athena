@@ -19,6 +19,7 @@ type genQueryResultsOutputByToken func(token string) (*athena.GetQueryResultsOut
 
 var queryToResultsGenMap = map[string]genQueryResultsOutputByToken{
 	"select":         dummySelectQueryResponse,
+	"select_zero":    dummySelectZeroQueryResponse,
 	"show":           dummyShowResponse,
 	"iteration_fail": dummyFailedIterationResponse,
 }
@@ -122,6 +123,28 @@ func dummySelectQueryResponse(token string) (*athena.GetQueryResultsOutput, erro
 	}
 }
 
+func dummySelectZeroQueryResponse(token string) (*athena.GetQueryResultsOutput, error) {
+	switch token {
+	case "":
+		columns := []*athena.ColumnInfo{
+			genColumnInfo("first_name"),
+			genColumnInfo("last_name"),
+		}
+		return &athena.GetQueryResultsOutput{
+			ResultSet: &athena.ResultSet{
+				ResultSetMetadata: &athena.ResultSetMetadata{
+					ColumnInfo: columns,
+				},
+				Rows: []*athena.Row{
+					genRow(true, columns),
+				},
+			},
+		}, nil
+	default:
+		return nil, dummyError
+	}
+}
+
 func dummyShowResponse(_ string) (*athena.GetQueryResultsOutput, error) {
 	columns := []*athena.ColumnInfo{
 		genColumnInfo("partition"),
@@ -196,6 +219,13 @@ func TestRows_Next(t *testing.T) {
 			queryID:             "show",
 			skipHeader:          false,
 			expectedResultsSize: 2,
+			expectedError:       nil,
+		},
+		{
+			desc:                "select query, header, 0 rows, no error",
+			queryID:             "select_zero",
+			skipHeader:          true,
+			expectedResultsSize: 0,
 			expectedError:       nil,
 		},
 		{
