@@ -20,9 +20,11 @@ import (
 )
 
 var (
-	AthenaDatabase = "go_athena_tests"
-	S3Bucket       = "go-athena-tests"
-	AwsRegion      = "us-east-1"
+	AthenaDatabase     = "go_athena_tests"
+	S3Bucket           = "go-athena-tests"
+	AwsRegion          = "us-east-1"
+	WorkGroup          = "primary"
+	AutoOutputLocation = false
 )
 
 func init() {
@@ -40,6 +42,10 @@ func init() {
 	if v := os.Getenv("ATHENA_REGION"); v != "" {
 		AwsRegion = v
 	}
+	if v := os.Getenv("ATHENA_WORK_GROUP"); v != "" {
+		WorkGroup = v
+	}
+	AutoOutputLocation = os.Getenv("ATHENA_AUTO_OUTPUT_LOCATION") == "1"
 }
 
 func TestQuery(t *testing.T) {
@@ -158,16 +164,19 @@ func TestOpen(t *testing.T) {
 		ResultModeGzipDL,
 	}
 
-	for _, resultMode := range resultModes {
-		db, err := Open(Config{
-			Session:        session,
-			Database:       AthenaDatabase,
-			OutputLocation: fmt.Sprintf("s3://%s", S3Bucket),
+	config := Config{
+		Session:   session,
+		Database:  AthenaDatabase,
+		WorkGroup: WorkGroup,
+		Timeout:   timeOutLimitDefault,
+	}
+	if !AutoOutputLocation {
+		config.OutputLocation = fmt.Sprintf("s3://%s", S3Bucket)
+	}
 
-			ResultMode: resultMode,
-			WorkGroup:  "primary",
-			Timeout:    timeOutLimitDefault,
-		})
+	for _, resultMode := range resultModes {
+		config.ResultMode = resultMode
+		db, err := Open(config)
 		require.NoError(t, err, fmt.Sprintf("Open. resultMode:%v", resultMode))
 
 		ctx := context.Background()
@@ -234,7 +243,12 @@ func setup(t *testing.T) *athenaHarness {
 	}
 	harness := athenaHarness{t: t, sess: sess}
 
-	harness.db, err = sql.Open("athena", fmt.Sprintf("db=%s&output_location=s3://%s&region=%s", AthenaDatabase, S3Bucket, AwsRegion))
+	connStr := fmt.Sprintf("db=%s&output_location=s3://%s&region=%s", AthenaDatabase, S3Bucket, AwsRegion)
+	if AutoOutputLocation {
+		connStr = fmt.Sprintf("db=%s&region=%s&workgroup=%s", AthenaDatabase, AwsRegion, WorkGroup)
+	}
+
+	harness.db, err = sql.Open("athena", connStr)
 	require.NoError(t, err)
 
 	harness.setupTable()

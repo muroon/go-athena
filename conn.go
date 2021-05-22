@@ -72,6 +72,15 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 		catalog = cat
 	}
 
+	// output location (with empty value)
+	if checkOutputLocation(resultMode, c.OutputLocation) {
+		var err error
+		c.OutputLocation, err = getOutputLocation(c.athena, c.workgroup)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// mode ctas
 	var ctasTable string
 	var afterDownload func() error

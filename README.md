@@ -72,6 +72,10 @@ The tests support a few environment variables:
 - `ATHENA_DATABASE` can be used to override the default database "go_athena_tests"
 - `S3_BUCKET` can be used to override the default S3 bucket of "go-athena-tests"
 - `ATHENA_REGION` or `AWS_DEFAULT_REGION` can be used to override the default region of "us-east-1"
+- `ATHENA_WORK_GROUP` can be used to override the default workgroup of "primary"
+- `ATHENA_AUTO_OUTPUT_LOCATION` is a parameter for test of getting output_location value from workgroup
+  - 0 (default value): Useless
+  - 1: It can make you get output_location value from query result location in workgroup
 
 
 [database/sql]: https://golang.org/pkg/database/sql/
