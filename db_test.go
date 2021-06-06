@@ -84,7 +84,7 @@ func TestQuery(t *testing.T) {
 			DecimalType:   0.48,
 		},
 	}
-	expectedTypeNames := []string{"varchar", "smallint", "integer", "bigint", "boolean", "float", "double", "varchar", "timestamp", "date", "decimal"}
+	expectedTypeNames := []string{"varchar", "smallint", "integer", "bigint", "boolean", "real", "double", "varchar", "timestamp", "date", "decimal"}
 	expectedTypeNameGzipDLs := []string{"string", "smallint", "int", "bigint", "boolean", "float", "double", "string", "timestamp", "date", "decimal(11,5)"}
 	harness.uploadData(expected)
 
