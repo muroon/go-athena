@@ -1,3 +1,8 @@
+# V1.0.2 (2021-07-03)
+
+- Add Getting output_location from workgroup [#18](https://github.com/speee/go-athena/pull/18)
+- Fix the error which occurs when the last character of output_location is '/' in GZIP DL Mode [#18](https://github.com/speee/go-athena/pull/18)
+
 # V1.0.1 (2021-03-23)
 
 Fixed bugs:
