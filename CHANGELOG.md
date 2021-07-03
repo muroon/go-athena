@@ -1,3 +1,9 @@
+# V1.0.1 (2021-03-23)
+
+Fixed bugs:
+
+- Fix not skipping headers if the result contains no rows [#16](https://github.com/speee/go-athena/pull/16)
+
 # V1.0.0 (2020-12-07)
 
 Initial release of go-athena by speee
@@ -11,9 +17,3 @@ The following functions have been added, including importing some of the issues 
 - Use workgroup
 - Modify test (make each package up to date)
 - Establish Result Mode (query result acquisition mode)
-
-# V1.0.1 (2021-03-23)
-
-Fixed bugs:
-
-- Fix not skipping headers if the result contains no rows [#16](https://github.com/speee/go-athena/pull/16)
