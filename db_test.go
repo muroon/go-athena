@@ -23,6 +23,7 @@ var (
 	AthenaDatabase = "go_athena_tests"
 	S3Bucket       = "go-athena-tests"
 	AwsRegion      = "us-east-1"
+	WorkGroup      = "primary"
 )
 
 func init() {
@@ -40,10 +41,13 @@ func init() {
 	if v := os.Getenv("ATHENA_REGION"); v != "" {
 		AwsRegion = v
 	}
+	if v := os.Getenv("ATHENA_WORK_GROUP"); v != "" {
+		WorkGroup = v
+	}
 }
 
 func TestQuery(t *testing.T) {
-	harness := setup(t)
+	harness := setup(t, false)
 	defer harness.teardown()
 
 	expected := []dummyRow{
@@ -145,6 +149,38 @@ func TestQuery(t *testing.T) {
 		require.Equal(t, 3, index+1, fmt.Sprintf("row count. resultMode:%v", resultMode))
 	}
 }
+func TestQueryForUsingWorkGroup(t *testing.T) {
+	resultModes := []ResultMode{
+		ResultModeAPI,
+		ResultModeDL,
+		ResultModeGzipDL,
+	}
+
+	for _, resultMode := range resultModes {
+		t.Run(fmt.Sprintf("ResultMode:%v", resultMode), func(t *testing.T) {
+			harness := setup(t, true)
+			defer harness.teardown()
+
+			ctx := context.Background()
+			switch resultMode {
+			case ResultModeAPI:
+				ctx = SetAPIMode(ctx)
+			case ResultModeDL:
+				ctx = SetDLMode(ctx)
+			case ResultModeGzipDL:
+				ctx = SetGzipDLMode(ctx)
+			}
+
+			rows := harness.mustQuery(ctx, "select count(*) as cnt from %s", harness.table)
+			defer rows.Close()
+			var cnt int
+			for rows.Next() {
+				require.NoError(t, rows.Scan(&cnt))
+				assert.Equal(t, 0, cnt)
+			}
+		})
+	}
+}
 
 func TestOpen(t *testing.T) {
 	var acfg []*aws.Config
@@ -158,30 +194,40 @@ func TestOpen(t *testing.T) {
 		ResultModeGzipDL,
 	}
 
-	for _, resultMode := range resultModes {
-		db, err := Open(Config{
-			Session:        session,
-			Database:       AthenaDatabase,
-			OutputLocation: fmt.Sprintf("s3://%s", S3Bucket),
+	s3Buckes := []string{
+		S3Bucket,
+		"",
+	}
 
-			ResultMode: resultMode,
-			WorkGroup:  "primary",
-			Timeout:    timeOutLimitDefault,
-		})
-		require.NoError(t, err, fmt.Sprintf("Open. resultMode:%v", resultMode))
+	for _, s3Bucket := range s3Buckes {
+		config := Config{
+			Session:   session,
+			Database:  AthenaDatabase,
+			WorkGroup: WorkGroup,
+			Timeout:   timeOutLimitDefault,
+		}
+		if s3Bucket != "" {
+			config.OutputLocation = fmt.Sprintf("s3://%s", s3Bucket)
+		}
 
-		ctx := context.Background()
-		_, err = db.QueryContext(ctx, "SELECT 1")
-		if resultMode == ResultModeGzipDL {
-			require.Error(t, err, "Query IN Gzip DL Mode")
-		} else {
-			require.NoError(t, err, fmt.Sprintf("Query IN resultMode:%v", resultMode))
+		for _, resultMode := range resultModes {
+			config.ResultMode = resultMode
+			db, err := Open(config)
+			require.NoError(t, err, fmt.Sprintf("Open. resultMode:%v", resultMode))
+
+			ctx := context.Background()
+			_, err = db.QueryContext(ctx, "SELECT 1")
+			if resultMode == ResultModeGzipDL {
+				require.Error(t, err, "Query IN Gzip DL Mode")
+			} else {
+				require.NoError(t, err, fmt.Sprintf("Query IN resultMode:%v", resultMode))
+			}
 		}
 	}
 }
 
 func TestDDLQuery(t *testing.T) {
-	harness := setup(t)
+	harness := setup(t, false)
 	defer harness.teardown()
 
 	rows := harness.mustQuery(context.Background(), "show tables")
@@ -223,7 +269,7 @@ type athenaHarness struct {
 	table string
 }
 
-func setup(t *testing.T) *athenaHarness {
+func setup(t *testing.T, useWorkGroup bool) *athenaHarness {
 	var acfg []*aws.Config
 	acfg = append(acfg, &aws.Config{
 		Region: aws.String(AwsRegion),
@@ -234,7 +280,12 @@ func setup(t *testing.T) *athenaHarness {
 	}
 	harness := athenaHarness{t: t, sess: sess}
 
-	harness.db, err = sql.Open("athena", fmt.Sprintf("db=%s&output_location=s3://%s&region=%s", AthenaDatabase, S3Bucket, AwsRegion))
+	connStr := fmt.Sprintf("db=%s&output_location=s3://%s&region=%s", AthenaDatabase, S3Bucket, AwsRegion)
+	if useWorkGroup {
+		connStr = fmt.Sprintf("db=%s&region=%s&workgroup=%s", AthenaDatabase, AwsRegion, WorkGroup)
+	}
+
+	harness.db, err = sql.Open("athena", connStr)
 	require.NoError(t, err)
 
 	harness.setupTable()

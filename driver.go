@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
 	"net/url"
 	"strconv"
 	"strings"
@@ -85,8 +86,20 @@ func (d *Driver) Open(connStr string) (driver.Conn, error) {
 		cfg.PollFrequency = 5 * time.Second
 	}
 
+	// athena client
+	athenaClient := athena.New(cfg.Session)
+
+	// output location (with empty value)
+	if checkOutputLocation(cfg.ResultMode, cfg.OutputLocation) {
+		var err error
+		cfg.OutputLocation, err = getOutputLocation(athenaClient, cfg.WorkGroup)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &conn{
-		athena:         athena.New(cfg.Session),
+		athena:         athenaClient,
 		db:             cfg.Database,
 		OutputLocation: cfg.OutputLocation,
 		pollFrequency:  cfg.PollFrequency,
@@ -104,10 +117,6 @@ func (d *Driver) Open(connStr string) (driver.Conn, error) {
 func Open(cfg Config) (*sql.DB, error) {
 	if cfg.Database == "" {
 		return nil, errors.New("db is required")
-	}
-
-	if cfg.OutputLocation == "" {
-		return nil, errors.New("s3_staging_url is required")
 	}
 
 	if cfg.Session == nil {
@@ -197,4 +206,23 @@ func configFromConnectionString(connStr string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// checkOutputLocation is to check if outputLocation should be obtained from workgroup.
+func checkOutputLocation(resultMode ResultMode, outputLocation string) bool {
+	return resultMode != ResultModeAPI && outputLocation == ""
+}
+
+// getOutputLocation is for getting output location value from workgroup when location value is empty.
+func getOutputLocation(athenaClient athenaiface.AthenaAPI, workGroup string) (string, error) {
+	var outputLocation string
+	output, err := athenaClient.GetWorkGroup(
+		&athena.GetWorkGroupInput{
+			WorkGroup: aws.String(workGroup),
+		},
+	)
+	if err == nil {
+		outputLocation = *output.WorkGroup.Configuration.ResultConfiguration.OutputLocation
+	}
+	return outputLocation, err
 }

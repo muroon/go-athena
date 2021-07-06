@@ -94,6 +94,10 @@ func (r *rowsGzipDL) downloadCompressedDataAsync(
 }
 
 func (r *rowsGzipDL) downloadCompressedData(sess *session.Session, location string) error {
+	if location[len(location)-1:] == "/" {
+		location = location[:len(location)-1]
+	}
+
 	// remove the first 5 characters "s3://" from location
 	bucketName := location[5:]
 
