@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/athena"
 	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
+	"github.com/prestodb/presto-go-client/presto"
 	"strings"
 	"time"
 )
@@ -47,7 +48,12 @@ func (s *stmtAthena) Exec(args []driver.Value) (driver.Result, error) {
 	for _, val := range args {
 		values = append(values, val)
 	}
-	_, err := s.runQuery(context.Background(), s.makeQuery(values))
+
+	query, err := s.makeQuery(values)
+	if err != nil {
+		return nil, err
+	}
+	_, err = s.runQuery(context.Background(), query)
 	return nil, err
 }
 
@@ -56,7 +62,12 @@ func (s *stmtAthena) Query(args []driver.Value) (driver.Rows, error) {
 	for _, val := range args {
 		values = append(values, val)
 	}
-	return s.runQuery(context.Background(), s.makeQuery(values))
+
+	query, err := s.makeQuery(values)
+	if err != nil {
+		return nil, err
+	}
+	return s.runQuery(context.Background(), query)
 }
 
 func (s *stmtAthena) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
@@ -64,7 +75,12 @@ func (s *stmtAthena) ExecContext(ctx context.Context, args []driver.NamedValue) 
 	for _, val := range args {
 		values = append(values, val.Value)
 	}
-	_, err := s.runQuery(ctx, s.makeQuery(values))
+
+	query, err := s.makeQuery(values)
+	if err != nil {
+		return nil, err
+	}
+	_, err = s.runQuery(ctx, query)
 	return nil, err
 }
 
@@ -73,16 +89,33 @@ func (s *stmtAthena) QueryContext(ctx context.Context, args []driver.NamedValue)
 	for _, val := range args {
 		values = append(values, val.Value)
 	}
-	return s.runQuery(ctx, s.makeQuery(values))
+
+	query, err := s.makeQuery(values)
+	if err != nil {
+		return nil, err
+	}
+	return s.runQuery(ctx, query)
 }
 
-func (s *stmtAthena) makeQuery(args []interface{}) string {
-	placeHolders := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		placeHolders = append(placeHolders, "%v")
+func (s *stmtAthena) makeQuery(args []interface{}) (string, error) {
+	params := make([]string, 0, len(args))
+	for _, arg := range args {
+		var param string
+		param, err := presto.Serial(arg)
+		if err != nil {
+			return "", err
+		}
+
+		params = append(params, param)
 	}
-	query := fmt.Sprintf("EXECUTE %s USING %s", s.prepareKey, strings.Join(placeHolders, ","))
-	return fmt.Sprintf(query, args...)
+
+	var query string
+	if len(params) > 0 {
+		query = fmt.Sprintf("EXECUTE %s USING %s", s.prepareKey, strings.Join(params, ","))
+	} else {
+		query = fmt.Sprintf("EXECUTE %s", s.prepareKey)
+	}
+	return query, nil
 }
 
 func (s *stmtAthena) runQuery(ctx context.Context, query string) (driver.Rows, error) {
