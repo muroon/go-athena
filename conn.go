@@ -84,7 +84,7 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 	// mode ctas
 	var ctasTable string
 	var afterDownload func() error
-	if isSelect && resultMode == ResultModeGzipDL {
+	if isCreateingCTASTable(isSelect, resultMode) {
 		// Create AS Select
 		ctasTable = fmt.Sprintf("tmp_ctas_%v", strings.Replace(uuid.NewV4().String(), "-", "", -1))
 		query = fmt.Sprintf("CREATE TABLE %s WITH (format='TEXTFILE') AS %s", ctasTable, query)
@@ -213,10 +213,10 @@ func (c *conn) prepareContext(ctx context.Context, query string) (driver.Stmt, e
 		resultMode = ResultModeAPI
 	}
 
-	// resultMode: GZIP_DL
+	// ctas
 	var ctasTable string
 	var afterDownload func() error
-	if true {
+	if isCreateingCTASTable(isSelect, resultMode) {
 		// Create AS Select
 		ctasTable = fmt.Sprintf("tmp_ctas_%v", strings.Replace(uuid.NewV4().String(), "-", "", -1))
 		query = fmt.Sprintf("CREATE TABLE %s WITH (format='TEXTFILE') AS %s", ctasTable, query)
@@ -294,4 +294,8 @@ func isSelectQuery(query string) bool {
 
 func isCTASQuery(query string) bool {
 	return regexp.MustCompile(`(?i)^CREATE.+AS\s+SELECT`).Match([]byte(query))
+}
+
+func isCreateingCTASTable(isSelect bool, resultMode ResultMode) bool {
+	return isSelect && resultMode == ResultModeGzipDL
 }
