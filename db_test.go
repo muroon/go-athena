@@ -161,7 +161,7 @@ func TestPrepare(t *testing.T) {
 			BigintType:    3,
 			BooleanType:   true,
 			FloatType:     3.14159,
-			DoubleType:    1.32112345,
+			DoubleType:    3.14159265358979323846264338327950288419716939937510,
 			StringType:    "some string",
 			TimestampType: athenaTimestamp(time.Date(2006, 1, 2, 3, 4, 11, 0, time.UTC)),
 			DateType:      athenaDate(time.Date(2006, 1, 2, 0, 0, 0, 0, time.UTC)),
@@ -172,7 +172,7 @@ func TestPrepare(t *testing.T) {
 			IntType:       8,
 			BigintType:    0,
 			BooleanType:   false,
-			FloatType:     3.14159,
+			FloatType:     3.1415,
 			DoubleType:    1.235,
 			StringType:    "another string",
 			TimestampType: athenaTimestamp(time.Date(2017, 12, 3, 1, 11, 12, 0, time.UTC)),
@@ -184,8 +184,8 @@ func TestPrepare(t *testing.T) {
 			IntType:       8,
 			BigintType:    0,
 			BooleanType:   false,
+			FloatType:     3.1415,
 			DoubleType:    1.235,
-			FloatType:     3.14159,
 			StringType:    "another string",
 			TimestampType: athenaTimestamp(time.Date(2017, 12, 3, 20, 11, 12, 0, time.UTC)),
 			DateType:      athenaDate(time.Date(2017, 12, 3, 0, 0, 0, 0, time.UTC)),
@@ -196,8 +196,8 @@ func TestPrepare(t *testing.T) {
 
 	resultModes := []ResultMode{
 		ResultModeAPI,
-		ResultModeDL,
-		ResultModeGzipDL,
+		//ResultModeDL,
+		//ResultModeGzipDL,
 	}
 
 	for _, resultMode := range resultModes {
@@ -292,6 +292,54 @@ func TestPrepare(t *testing.T) {
 			require.NoError(t, err)
 
 			rows, err := stmt.QueryContext(ctx, expected[0].BooleanType)
+			defer rows.Close()
+			require.NoError(t, err)
+
+			var length int
+			for rows.Next() {
+				length++
+				var got dummyRow
+				err := rows.Scan(
+					&got.NullValue, &got.SmallintType, &got.IntType, &got.BigintType, &got.BooleanType, &got.FloatType, &got.DoubleType, &got.StringType, &got.TimestampType, &got.DateType, &got.DecimalType,
+				)
+				require.NoError(t, err)
+				assert.Equal(t, expected[0], got, fmt.Sprintf("resultMode:%v, prepareIntType error", resultMode))
+			}
+			assert.Equal(t, 1, length)
+		})
+		t.Run(fmt.Sprintf("ResultMode:%v/FloatType", resultMode), func(t *testing.T) {
+			stmt, err := harness.prepare(ctx, fmt.Sprintf("select * from %s where floatType = ?", harness.table))
+			defer func() {
+				err := stmt.Close()
+				require.NoError(t, err)
+			}()
+			require.NoError(t, err)
+
+			rows, err := stmt.QueryContext(ctx, expected[0].FloatType)
+			defer rows.Close()
+			require.NoError(t, err)
+
+			var length int
+			for rows.Next() {
+				length++
+				var got dummyRow
+				err := rows.Scan(
+					&got.NullValue, &got.SmallintType, &got.IntType, &got.BigintType, &got.BooleanType, &got.FloatType, &got.DoubleType, &got.StringType, &got.TimestampType, &got.DateType, &got.DecimalType,
+				)
+				require.NoError(t, err)
+				assert.Equal(t, expected[0], got, fmt.Sprintf("resultMode:%v, prepareIntType error", resultMode))
+			}
+			assert.Equal(t, 1, length)
+		})
+		t.Run(fmt.Sprintf("ResultMode:%v/DoubleType", resultMode), func(t *testing.T) {
+			stmt, err := harness.prepare(ctx, fmt.Sprintf("select * from %s where doubleType = ?", harness.table))
+			defer func() {
+				err := stmt.Close()
+				require.NoError(t, err)
+			}()
+			require.NoError(t, err)
+
+			rows, err := stmt.QueryContext(ctx, expected[0].DoubleType)
 			defer rows.Close()
 			require.NoError(t, err)
 
