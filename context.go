@@ -62,11 +62,28 @@ const catalogContextKey string = "catalog_key"
 var CatalogContextKey string = contextPrefix + catalogContextKey
 
 // SetCatalog set catalog from context
-func SetTimout(ctx context.Context, catalog string) context.Context {
+func SetCatalog(ctx context.Context, catalog string) context.Context {
 	return context.WithValue(ctx, CatalogContextKey, catalog)
 }
 
 func getCatalog(ctx context.Context) (string, bool) {
 	val, ok := ctx.Value(CatalogContextKey).(string)
 	return val, ok
+}
+
+/*
+ * force using string type with numeric string
+ */
+const forceNumericContextKey string = "force_numeric_string_key"
+
+// ForceNumericStringContextKey context key of force numeric string
+var ForceNumericStringContextKey = contextPrefix + forceNumericContextKey
+
+func SetForceNumericString(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ForceNumericStringContextKey, true)
+}
+
+func getForNumericString(ctx context.Context) bool {
+	val, ok := ctx.Value(ForceNumericStringContextKey).(bool)
+	return val && ok
 }

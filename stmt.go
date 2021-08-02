@@ -50,11 +50,13 @@ func (s *stmtAthena) Exec(args []driver.Value) (driver.Result, error) {
 		values = append(values, val)
 	}
 
-	query, err := s.makeQuery(values)
+	ctx := context.Background()
+
+	query, err := s.makeQuery(ctx, values)
 	if err != nil {
 		return nil, err
 	}
-	_, err = s.runQuery(context.Background(), query)
+	_, err = s.runQuery(ctx, query)
 	return nil, err
 }
 
@@ -64,11 +66,13 @@ func (s *stmtAthena) Query(args []driver.Value) (driver.Rows, error) {
 		values = append(values, val)
 	}
 
-	query, err := s.makeQuery(values)
+	ctx := context.Background()
+
+	query, err := s.makeQuery(ctx, values)
 	if err != nil {
 		return nil, err
 	}
-	return s.runQuery(context.Background(), query)
+	return s.runQuery(ctx, query)
 }
 
 func (s *stmtAthena) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
@@ -77,7 +81,7 @@ func (s *stmtAthena) ExecContext(ctx context.Context, args []driver.NamedValue) 
 		values = append(values, val.Value)
 	}
 
-	query, err := s.makeQuery(values)
+	query, err := s.makeQuery(ctx, values)
 	if err != nil {
 		return nil, err
 	}
@@ -91,18 +95,18 @@ func (s *stmtAthena) QueryContext(ctx context.Context, args []driver.NamedValue)
 		values = append(values, val.Value)
 	}
 
-	query, err := s.makeQuery(values)
+	query, err := s.makeQuery(ctx, values)
 	if err != nil {
 		return nil, err
 	}
 	return s.runQuery(ctx, query)
 }
 
-func (s *stmtAthena) makeQuery(args []interface{}) (string, error) {
+func (s *stmtAthena) makeQuery(ctx context.Context, args []interface{}) (string, error) {
 	params := make([]string, 0, len(args))
 	for _, arg := range args {
 		var param string
-		param, err := serial(arg)
+		param, err := serial(ctx, arg)
 		if err != nil {
 			return "", err
 		}
@@ -243,10 +247,13 @@ func (s *stmtAthena) waitOnQuery(ctx context.Context, queryID string) error {
 	}
 }
 
-func serial(v interface{}) (string, error) {
-	if x, ok := v.(string); ok {
-		if _, err := strconv.ParseFloat(string(x), 64); err == nil {
-			return presto.Serial(presto.Numeric(x))
+func serial(ctx context.Context, v interface{}) (string, error) {
+	forceNumericString := getForNumericString(ctx)
+	if !forceNumericString {
+		if x, ok := v.(string); ok {
+			if _, err := strconv.ParseFloat(string(x), 64); err == nil {
+				return presto.Serial(presto.Numeric(x))
+			}
 		}
 	}
 
