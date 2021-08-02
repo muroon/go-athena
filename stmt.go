@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/athena"
 	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
 	"github.com/prestodb/presto-go-client/presto"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -101,7 +102,7 @@ func (s *stmtAthena) makeQuery(args []interface{}) (string, error) {
 	params := make([]string, 0, len(args))
 	for _, arg := range args {
 		var param string
-		param, err := presto.Serial(arg)
+		param, err := serial(arg)
 		if err != nil {
 			return "", err
 		}
@@ -240,4 +241,14 @@ func (s *stmtAthena) waitOnQuery(ctx context.Context, queryID string) error {
 			continue
 		}
 	}
+}
+
+func serial(v interface{}) (string, error) {
+	if x, ok := v.(string); ok {
+		if _, err := strconv.ParseFloat(string(x), 64); err == nil {
+			return presto.Serial(presto.Numeric(x))
+		}
+	}
+
+	return presto.Serial(v)
 }
