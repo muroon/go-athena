@@ -239,19 +239,12 @@ func (c *conn) prepareContext(ctx context.Context, query string) (driver.Stmt, e
 	}
 
 	return &stmtAthena{
-		prepareKey:     prepareKey,
-		numInput:       numInput,
-		ctasTable:      ctasTable,
-		afterDownload:  afterDownload,
-		athena:         c.athena,
-		db:             c.db,
-		OutputLocation: c.OutputLocation,
-		workgroup:      c.workgroup,
-		pollFrequency:  c.pollFrequency,
-		resultMode:     resultMode,
-		session:        c.session,
-		timeout:        c.timeout,
-		catalog:        c.catalog,
+		prepareKey:    prepareKey,
+		numInput:      numInput,
+		ctasTable:     ctasTable,
+		afterDownload: afterDownload,
+		conn:          c,
+		resultMode:    resultMode,
 	}, nil
 }
 

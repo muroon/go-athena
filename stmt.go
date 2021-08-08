@@ -3,16 +3,10 @@ package athena
 import (
 	"context"
 	"database/sql/driver"
-	"errors"
 	"fmt"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/athena"
-	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
 	"github.com/prestodb/presto-go-client/presto"
 	"strconv"
 	"strings"
-	"time"
 )
 
 type stmtAthena struct {
@@ -20,23 +14,13 @@ type stmtAthena struct {
 	numInput      int
 	ctasTable     string
 	afterDownload func() error
-
-	athena         athenaiface.AthenaAPI
-	db             string
-	OutputLocation string
-	workgroup      string
-
-	pollFrequency time.Duration
-
-	resultMode ResultMode
-	session    *session.Session
-	timeout    uint
-	catalog    string
+	conn          *conn
+	resultMode    ResultMode
 }
 
 func (s *stmtAthena) Close() error {
 	query := fmt.Sprintf("DEALLOCATE PREPARE %s", s.prepareKey)
-	_, err := s.startQuery(query)
+	_, err := s.conn.startQuery(query)
 	return err
 }
 
@@ -124,127 +108,49 @@ func (s *stmtAthena) makeQuery(ctx context.Context, args []interface{}) (string,
 }
 
 func (s *stmtAthena) runQuery(ctx context.Context, query string) (driver.Rows, error) {
-	/*
-		// result mode
-		isSelect := isSelectQuery(query)
-		resultMode := s.resultMode
-		if rmode, ok := getResultMode(ctx); ok {
-			resultMode = rmode
-		}
-		if !isSelect {
-			resultMode = ResultModeAPI
-		}
-	*/
-
 	// timeout
-	timeout := s.timeout
+	timeout := s.conn.timeout
 	if to, ok := getTimeout(ctx); ok {
 		timeout = to
 	}
 
 	// catalog
-	catalog := s.catalog
+	catalog := s.conn.catalog
 	if cat, ok := getCatalog(ctx); ok {
 		catalog = cat
 	}
 
 	// output location (with empty value)
-	if checkOutputLocation(s.resultMode, s.OutputLocation) {
+	if checkOutputLocation(s.resultMode, s.conn.OutputLocation) {
 		var err error
-		s.OutputLocation, err = getOutputLocation(s.athena, s.workgroup)
+		s.conn.OutputLocation, err = getOutputLocation(s.conn.athena, s.conn.workgroup)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	// mode ctas
-	//var ctasTable string
-	//var afterDownload func() error
-	/*
-		if isSelect && resultMode == ResultModeGzipDL {
-			// Create AS Select
-			ctasTable = fmt.Sprintf("tmp_ctas_%v", strings.Replace(uuid.NewV4().String(), "-", "", -1))
-			query = fmt.Sprintf("CREATE TABLE %s WITH (format='TEXTFILE') AS %s", ctasTable, query)
-			afterDownload = c.dropCTASTable(ctx, ctasTable)
-		}
-	*/
-
-	queryID, err := s.startQuery(query)
+	queryID, err := s.conn.startQuery(query)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := s.waitOnQuery(ctx, queryID); err != nil {
+	if err := s.conn.waitOnQuery(ctx, queryID); err != nil {
 		return nil, err
 	}
 
 	return newRows(rowsConfig{
-		Athena:         s.athena,
+		Athena:         s.conn.athena,
 		QueryID:        queryID,
 		SkipHeader:     !isDDLQuery(query),
 		ResultMode:     s.resultMode,
-		Session:        s.session,
-		OutputLocation: s.OutputLocation,
+		Session:        s.conn.session,
+		OutputLocation: s.conn.OutputLocation,
 		Timeout:        timeout,
 		AfterDownload:  s.afterDownload,
 		CTASTable:      s.ctasTable,
-		DB:             s.db,
+		DB:             s.conn.db,
 		Catalog:        catalog,
 	})
-}
-
-// startQuery starts an Athena query and returns its ID.
-func (s *stmtAthena) startQuery(query string) (string, error) {
-	resp, err := s.athena.StartQueryExecution(&athena.StartQueryExecutionInput{
-		QueryString: aws.String(query),
-		QueryExecutionContext: &athena.QueryExecutionContext{
-			Database: aws.String(s.db),
-		},
-		ResultConfiguration: &athena.ResultConfiguration{
-			OutputLocation: aws.String(s.OutputLocation),
-		},
-		WorkGroup: aws.String(s.workgroup),
-	})
-	if err != nil {
-		return "", err
-	}
-
-	return *resp.QueryExecutionId, nil
-}
-
-// waitOnQuery blocks until a query finishes, returning an error if it failed.
-func (s *stmtAthena) waitOnQuery(ctx context.Context, queryID string) error {
-	for {
-		statusResp, err := s.athena.GetQueryExecutionWithContext(ctx, &athena.GetQueryExecutionInput{
-			QueryExecutionId: aws.String(queryID),
-		})
-		if err != nil {
-			return err
-		}
-
-		switch *statusResp.QueryExecution.Status.State {
-		case athena.QueryExecutionStateCancelled:
-			return context.Canceled
-		case athena.QueryExecutionStateFailed:
-			reason := *statusResp.QueryExecution.Status.StateChangeReason
-			return errors.New(reason)
-		case athena.QueryExecutionStateSucceeded:
-			return nil
-		case athena.QueryExecutionStateQueued:
-		case athena.QueryExecutionStateRunning:
-		}
-
-		select {
-		case <-ctx.Done():
-			s.athena.StopQueryExecution(&athena.StopQueryExecutionInput{
-				QueryExecutionId: aws.String(queryID),
-			})
-
-			return ctx.Err()
-		case <-time.After(s.pollFrequency):
-			continue
-		}
-	}
 }
 
 func serial(ctx context.Context, v interface{}) (string, error) {
