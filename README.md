@@ -60,6 +60,11 @@ Note
 - Detailed explanation is described [here](doc/result_mode.md).
 - [Usages of Result Mode](doc/result_mode.md#usages).
 
+## Prepare Statements
+
+You can use [Athena Prepared Statements](https://docs.aws.amazon.com/athena/latest/ug/querying-with-prepared-statements.html).
+Click [here](doc/prepare.md) for details on how to use.
+
 ## Testing
 
 Athena doesn't have a local version and revolves around S3 so our tests are
