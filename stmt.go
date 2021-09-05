@@ -161,6 +161,25 @@ func serial(ctx context.Context, v interface{}) (string, error) {
 				return presto.Serial(presto.Numeric(x))
 			}
 		}
+
+		if x, ok := v.([]string); ok {
+			isNumeric := true
+		loop:
+			for _, v := range x {
+				if _, err := strconv.ParseFloat(v, 64); err != nil {
+					isNumeric = false
+					break loop
+				}
+			}
+
+			if isNumeric {
+				l := make([]presto.Numeric, 0, len(x))
+				for _, v := range x {
+					l = append(l, presto.Numeric(v))
+				}
+				return presto.Serial(l)
+			}
+		}
 	}
 
 	return presto.Serial(v)
