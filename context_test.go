@@ -17,9 +17,14 @@ func Test_getForNumericString(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "SetForceNumericString",
-			ctx:  SetForceNumericString(context.Background()),
+			name: "SetForceNumericString:true",
+			ctx:  SetForceNumericString(context.Background(), true),
 			want: true,
+		},
+		{
+			name: "SetForceNumericString:false",
+			ctx:  SetForceNumericString(context.Background(), false),
+			want: false,
 		},
 	}
 	for _, tt := range tests {

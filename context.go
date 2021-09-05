@@ -79,8 +79,8 @@ const forceNumericContextKey string = "force_numeric_string_key"
 // ForceNumericStringContextKey context key of force numeric string
 var ForceNumericStringContextKey = contextPrefix + forceNumericContextKey
 
-func SetForceNumericString(ctx context.Context) context.Context {
-	return context.WithValue(ctx, ForceNumericStringContextKey, true)
+func SetForceNumericString(ctx context.Context, val bool) context.Context {
+	return context.WithValue(ctx, ForceNumericStringContextKey, val)
 }
 
 func getForNumericString(ctx context.Context) bool {

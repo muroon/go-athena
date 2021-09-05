@@ -187,7 +187,7 @@ func TestPrepare(t *testing.T) {
 			BooleanType:   false,
 			FloatType:     3.14159,
 			DoubleType:    3141592653589.8,
-			StringType:    "another string",
+			StringType:    "123.456",
 			TimestampType: athenaTimestamp(time.Date(2017, 12, 3, 20, 11, 12, 0, time.UTC)),
 			DateType:      athenaDate(time.Date(2017, 12, 3, 0, 0, 0, 0, time.UTC)),
 			DecimalType:   0.48,
@@ -202,10 +202,12 @@ func TestPrepare(t *testing.T) {
 	}
 
 	tests := []struct {
-		name   string
-		sql    string
-		params []interface{}
-		want   dummyRow
+		name      string
+		sql       string
+		params    []interface{}
+		startFunc func(ctx context.Context) context.Context
+		endFunc   func(ctx context.Context) context.Context
+		want      dummyRow
 	}{
 		{
 			name:   "NoInput",
@@ -231,6 +233,14 @@ func TestPrepare(t *testing.T) {
 			params: []interface{}{strconv.FormatFloat(float64(data[0].FloatType), 'f', -1, 32)},
 			want:   data[0],
 		},
+		{
+			name:      "Numeric String",
+			sql:       fmt.Sprintf("select * from %s where stringType = ?", harness.table),
+			params:    []interface{}{data[2].StringType},
+			startFunc: func(ctx context.Context) context.Context { return SetForceNumericString(ctx, true) },
+			endFunc:   func(ctx context.Context) context.Context { return SetForceNumericString(ctx, false) },
+			want:      data[2],
+		},
 	}
 
 	for _, resultMode := range resultModes {
@@ -246,6 +256,15 @@ func TestPrepare(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(fmt.Sprintf("ResultMode:%v/%s", resultMode, test.name), func(t *testing.T) {
+				if startFunc := test.startFunc; startFunc != nil {
+					ctx = startFunc(ctx)
+				}
+				if endFunc := test.startFunc; endFunc != nil {
+					defer func() {
+						ctx = endFunc(ctx)
+					}()
+				}
+
 				stmt, err := harness.prepare(ctx, test.sql)
 				defer func() {
 					err := stmt.Close()
