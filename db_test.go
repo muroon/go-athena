@@ -6,9 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/prestodb/presto-go-client/presto"
 	"os"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -198,8 +196,8 @@ func TestPrepare(t *testing.T) {
 
 	resultModes := []ResultMode{
 		ResultModeAPI,
-		ResultModeDL,
-		ResultModeGzipDL,
+		//ResultModeDL,
+		//ResultModeGzipDL,
 	}
 
 	for _, resultMode := range resultModes {
@@ -213,169 +211,208 @@ func TestPrepare(t *testing.T) {
 			ctx = SetGzipDLMode(ctx)
 		}
 
-		t.Run(fmt.Sprintf("ResultMode:%v/NoInput", resultMode), func(t *testing.T) {
-			stmt, err := harness.prepare(ctx, fmt.Sprintf("select * from %s order by intType limit 1", harness.table))
+		/*
+			t.Run(fmt.Sprintf("ResultMode:%v/NoInput", resultMode), func(t *testing.T) {
+				stmt, err := harness.prepare(ctx, fmt.Sprintf("select * from %s order by intType limit 1", harness.table))
+				defer func() {
+					err := stmt.Close()
+					require.NoError(t, err)
+				}()
+				require.NoError(t, err)
+
+				_, err = stmt.ExecContext(ctx)
+				require.NoError(t, err)
+
+				rows, err := stmt.QueryContext(ctx)
+				defer rows.Close()
+				require.NoError(t, err)
+
+				var length int
+				for rows.Next() {
+					length++
+					var got dummyRow
+					err := rows.Scan(
+						&got.NullValue, &got.SmallintType, &got.IntType, &got.BigintType, &got.BooleanType, &got.FloatType, &got.DoubleType, &got.StringType, &got.TimestampType, &got.DateType, &got.DecimalType,
+					)
+					require.NoError(t, err)
+					assert.Equal(t, expected[0], got, fmt.Sprintf("resultMode:%v, prepareIntType error", resultMode))
+				}
+				assert.Equal(t, 1, length)
+			})
+			t.Run(fmt.Sprintf("ResultMode:%v/IntType", resultMode), func(t *testing.T) {
+				stmt, err := harness.prepare(ctx, fmt.Sprintf("select * from %s where intType = ?", harness.table))
+				defer func() {
+					err := stmt.Close()
+					require.NoError(t, err)
+				}()
+				require.NoError(t, err)
+
+				_, err = stmt.ExecContext(ctx, expected[0].IntType)
+				require.NoError(t, err)
+
+				rows, err := stmt.QueryContext(ctx, expected[0].IntType)
+				defer rows.Close()
+				require.NoError(t, err)
+
+				var length int
+				for rows.Next() {
+					length++
+					var got dummyRow
+					err := rows.Scan(
+						&got.NullValue, &got.SmallintType, &got.IntType, &got.BigintType, &got.BooleanType, &got.FloatType, &got.DoubleType, &got.StringType, &got.TimestampType, &got.DateType, &got.DecimalType,
+					)
+					require.NoError(t, err)
+					assert.Equal(t, expected[0], got, fmt.Sprintf("resultMode:%v, prepareIntType error", resultMode))
+				}
+				assert.Equal(t, 1, length)
+			})
+			t.Run(fmt.Sprintf("ResultMode:%v/StringType", resultMode), func(t *testing.T) {
+				stmt, err := harness.prepare(ctx, fmt.Sprintf("select * from %s where stringType = ?", harness.table))
+				defer func() {
+					err := stmt.Close()
+					require.NoError(t, err)
+				}()
+				require.NoError(t, err)
+
+				_, err = stmt.ExecContext(ctx, expected[0].StringType)
+				require.NoError(t, err)
+
+				rows, err := stmt.QueryContext(ctx, expected[0].StringType)
+				defer rows.Close()
+				require.NoError(t, err)
+
+				var length int
+				for rows.Next() {
+					length++
+					var got dummyRow
+					err := rows.Scan(
+						&got.NullValue, &got.SmallintType, &got.IntType, &got.BigintType, &got.BooleanType, &got.FloatType, &got.DoubleType, &got.StringType, &got.TimestampType, &got.DateType, &got.DecimalType,
+					)
+					require.NoError(t, err)
+					assert.Equal(t, expected[0], got, fmt.Sprintf("resultMode:%v, prepareIntType error", resultMode))
+				}
+				assert.Equal(t, 1, length)
+			})
+			t.Run(fmt.Sprintf("ResultMode:%v/BooleanType", resultMode), func(t *testing.T) {
+				stmt, err := harness.prepare(ctx, fmt.Sprintf("select * from %s where booleanType = ?", harness.table))
+				defer func() {
+					err := stmt.Close()
+					require.NoError(t, err)
+				}()
+				require.NoError(t, err)
+
+				_, err = stmt.ExecContext(ctx, expected[0].BooleanType)
+				require.NoError(t, err)
+
+				rows, err := stmt.QueryContext(ctx, expected[0].BooleanType)
+				defer rows.Close()
+				require.NoError(t, err)
+
+				var length int
+				for rows.Next() {
+					length++
+					var got dummyRow
+					err := rows.Scan(
+						&got.NullValue, &got.SmallintType, &got.IntType, &got.BigintType, &got.BooleanType, &got.FloatType, &got.DoubleType, &got.StringType, &got.TimestampType, &got.DateType, &got.DecimalType,
+					)
+					require.NoError(t, err)
+					assert.Equal(t, expected[0], got, fmt.Sprintf("resultMode:%v, prepareIntType error", resultMode))
+				}
+				assert.Equal(t, 1, length)
+			})
+			t.Run(fmt.Sprintf("ResultMode:%v/FloatType", resultMode), func(t *testing.T) {
+				stmt, err := harness.prepare(ctx, fmt.Sprintf("select * from %s where cast(floattype as decimal(8,7)) = ?", harness.table))
+				defer func() {
+					err := stmt.Close()
+					require.NoError(t, err)
+				}()
+				require.NoError(t, err)
+
+				param := strconv.FormatFloat(float64(expected[0].FloatType), 'f', -1, 32)
+
+				_, err = stmt.ExecContext(ctx, param)
+				require.NoError(t, err)
+
+				rows, err := stmt.QueryContext(ctx, param)
+				defer rows.Close()
+				require.NoError(t, err)
+
+				var length int
+				for rows.Next() {
+					length++
+					var got dummyRow
+					err := rows.Scan(
+						&got.NullValue, &got.SmallintType, &got.IntType, &got.BigintType, &got.BooleanType, &got.FloatType, &got.DoubleType, &got.StringType, &got.TimestampType, &got.DateType, &got.DecimalType,
+					)
+					require.NoError(t, err)
+					assert.Equal(t, expected[0], got, fmt.Sprintf("resultMode:%v, prepareIntType error", resultMode))
+				}
+				assert.Equal(t, 1, length)
+			})
+			t.Run(fmt.Sprintf("ResultMode:%v/DoubleType", resultMode), func(t *testing.T) {
+				stmt, err := harness.prepare(ctx, fmt.Sprintf("select * from %s where cast(doubletype as decimal(16,3)) = ?", harness.table))
+				defer func() {
+					err := stmt.Close()
+					require.NoError(t, err)
+				}()
+				require.NoError(t, err)
+
+				param := strconv.FormatFloat(float64(expected[0].DoubleType), 'f', -1, 64)
+
+				_, err = stmt.ExecContext(ctx, param)
+				require.NoError(t, err)
+
+				rows, err := stmt.QueryContext(ctx, param)
+				defer rows.Close()
+				require.NoError(t, err)
+
+				var length int
+				for rows.Next() {
+					length++
+					var got dummyRow
+					err := rows.Scan(
+						&got.NullValue, &got.SmallintType, &got.IntType, &got.BigintType, &got.BooleanType, &got.FloatType, &got.DoubleType, &got.StringType, &got.TimestampType, &got.DateType, &got.DecimalType,
+					)
+					require.NoError(t, err)
+					assert.Equal(t, expected[0], got, fmt.Sprintf("resultMode:%v, prepareIntType error", resultMode))
+				}
+				assert.Equal(t, 1, length)
+			})
+		*/
+		t.Run(fmt.Sprintf("ResultMode:%v/Array", resultMode), func(t *testing.T) {
+			sql := `
+with
+dataset as (
+  select array[1,2,3] as items
+)
+select items
+from dataset
+where items = ?
+`
+			stmt, err := harness.prepare(ctx, sql)
 			defer func() {
 				err := stmt.Close()
 				require.NoError(t, err)
 			}()
 			require.NoError(t, err)
 
-			_, err = stmt.ExecContext(ctx)
-			require.NoError(t, err)
+			param := []uint8{1, 2, 3}
 
-			rows, err := stmt.QueryContext(ctx)
+			rows, err := stmt.QueryContext(ctx, param)
 			defer rows.Close()
 			require.NoError(t, err)
 
 			var length int
 			for rows.Next() {
 				length++
-				var got dummyRow
-				err := rows.Scan(
-					&got.NullValue, &got.SmallintType, &got.IntType, &got.BigintType, &got.BooleanType, &got.FloatType, &got.DoubleType, &got.StringType, &got.TimestampType, &got.DateType, &got.DecimalType,
-				)
-				require.NoError(t, err)
-				assert.Equal(t, expected[0], got, fmt.Sprintf("resultMode:%v, prepareIntType error", resultMode))
-			}
-			assert.Equal(t, 1, length)
-		})
-		t.Run(fmt.Sprintf("ResultMode:%v/IntType", resultMode), func(t *testing.T) {
-			stmt, err := harness.prepare(ctx, fmt.Sprintf("select * from %s where intType = ?", harness.table))
-			defer func() {
-				err := stmt.Close()
-				require.NoError(t, err)
-			}()
-			require.NoError(t, err)
-
-			_, err = stmt.ExecContext(ctx, expected[0].IntType)
-			require.NoError(t, err)
-
-			rows, err := stmt.QueryContext(ctx, expected[0].IntType)
-			defer rows.Close()
-			require.NoError(t, err)
-
-			var length int
-			for rows.Next() {
-				length++
-				var got dummyRow
-				err := rows.Scan(
-					&got.NullValue, &got.SmallintType, &got.IntType, &got.BigintType, &got.BooleanType, &got.FloatType, &got.DoubleType, &got.StringType, &got.TimestampType, &got.DateType, &got.DecimalType,
-				)
-				require.NoError(t, err)
-				assert.Equal(t, expected[0], got, fmt.Sprintf("resultMode:%v, prepareIntType error", resultMode))
-			}
-			assert.Equal(t, 1, length)
-		})
-		t.Run(fmt.Sprintf("ResultMode:%v/StringType", resultMode), func(t *testing.T) {
-			stmt, err := harness.prepare(ctx, fmt.Sprintf("select * from %s where stringType = ?", harness.table))
-			defer func() {
-				err := stmt.Close()
-				require.NoError(t, err)
-			}()
-			require.NoError(t, err)
-
-			_, err = stmt.ExecContext(ctx, expected[0].StringType)
-			require.NoError(t, err)
-
-			rows, err := stmt.QueryContext(ctx, expected[0].StringType)
-			defer rows.Close()
-			require.NoError(t, err)
-
-			var length int
-			for rows.Next() {
-				length++
-				var got dummyRow
-				err := rows.Scan(
-					&got.NullValue, &got.SmallintType, &got.IntType, &got.BigintType, &got.BooleanType, &got.FloatType, &got.DoubleType, &got.StringType, &got.TimestampType, &got.DateType, &got.DecimalType,
-				)
-				require.NoError(t, err)
-				assert.Equal(t, expected[0], got, fmt.Sprintf("resultMode:%v, prepareIntType error", resultMode))
-			}
-			assert.Equal(t, 1, length)
-		})
-		t.Run(fmt.Sprintf("ResultMode:%v/BooleanType", resultMode), func(t *testing.T) {
-			stmt, err := harness.prepare(ctx, fmt.Sprintf("select * from %s where booleanType = ?", harness.table))
-			defer func() {
-				err := stmt.Close()
-				require.NoError(t, err)
-			}()
-			require.NoError(t, err)
-
-			_, err = stmt.ExecContext(ctx, expected[0].BooleanType)
-			require.NoError(t, err)
-
-			rows, err := stmt.QueryContext(ctx, expected[0].BooleanType)
-			defer rows.Close()
-			require.NoError(t, err)
-
-			var length int
-			for rows.Next() {
-				length++
-				var got dummyRow
-				err := rows.Scan(
-					&got.NullValue, &got.SmallintType, &got.IntType, &got.BigintType, &got.BooleanType, &got.FloatType, &got.DoubleType, &got.StringType, &got.TimestampType, &got.DateType, &got.DecimalType,
-				)
-				require.NoError(t, err)
-				assert.Equal(t, expected[0], got, fmt.Sprintf("resultMode:%v, prepareIntType error", resultMode))
-			}
-			assert.Equal(t, 1, length)
-		})
-		t.Run(fmt.Sprintf("ResultMode:%v/FloatType", resultMode), func(t *testing.T) {
-			stmt, err := harness.prepare(ctx, fmt.Sprintf("select * from %s where cast(floattype as decimal(8,7)) = ?", harness.table))
-			defer func() {
-				err := stmt.Close()
-				require.NoError(t, err)
-			}()
-			require.NoError(t, err)
-
-			param := strconv.FormatFloat(float64(expected[0].FloatType), 'f', -1, 32)
-
-			_, err = stmt.ExecContext(ctx, presto.Numeric(param))
-			require.NoError(t, err)
-
-			rows, err := stmt.QueryContext(ctx, presto.Numeric(param))
-			defer rows.Close()
-			require.NoError(t, err)
-
-			var length int
-			for rows.Next() {
-				length++
-				var got dummyRow
-				err := rows.Scan(
-					&got.NullValue, &got.SmallintType, &got.IntType, &got.BigintType, &got.BooleanType, &got.FloatType, &got.DoubleType, &got.StringType, &got.TimestampType, &got.DateType, &got.DecimalType,
-				)
-				require.NoError(t, err)
-				assert.Equal(t, expected[0], got, fmt.Sprintf("resultMode:%v, prepareIntType error", resultMode))
-			}
-			assert.Equal(t, 1, length)
-		})
-		t.Run(fmt.Sprintf("ResultMode:%v/DoubleType", resultMode), func(t *testing.T) {
-			stmt, err := harness.prepare(ctx, fmt.Sprintf("select * from %s where cast(doubletype as decimal(16,3)) = ?", harness.table))
-			defer func() {
-				err := stmt.Close()
-				require.NoError(t, err)
-			}()
-			require.NoError(t, err)
-
-			param := strconv.FormatFloat(float64(expected[0].DoubleType), 'f', -1, 64)
-
-			_, err = stmt.ExecContext(ctx, presto.Numeric(param))
-			require.NoError(t, err)
-
-			rows, err := stmt.QueryContext(ctx, presto.Numeric(param))
-			defer rows.Close()
-			require.NoError(t, err)
-
-			var length int
-			for rows.Next() {
-				length++
-				var got dummyRow
-				err := rows.Scan(
-					&got.NullValue, &got.SmallintType, &got.IntType, &got.BigintType, &got.BooleanType, &got.FloatType, &got.DoubleType, &got.StringType, &got.TimestampType, &got.DateType, &got.DecimalType,
-				)
-				require.NoError(t, err)
-				assert.Equal(t, expected[0], got, fmt.Sprintf("resultMode:%v, prepareIntType error", resultMode))
+				/*
+					var items []int
+					err := rows.Scan(
+						&items,
+					)
+					require.NoError(t, err)
+					assert.Equal(t, param, items, fmt.Sprintf("resultMode:%v, prepareIntType error", resultMode))
+				*/
 			}
 			assert.Equal(t, 1, length)
 		})
