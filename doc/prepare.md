@@ -48,7 +48,7 @@ You can use [Prepared Statements on Athena](https://docs.aws.amazon.com/athena/l
 
 ```
 intParam := 1
-stmt, _ := db.PrepareContext(ctx, fmt.Sprintf("SELECT * FROM test_table WHERE int_column = ?"))
+stmt, _ := db.PrepareContext(ctx, "SELECT * FROM test_table WHERE int_column = ?")
 rows, _ := stmt.QueryContext(ctx, intParam) 
 ```
 execute `SELECT * FROM test_table WHERE int_column = 1`
@@ -57,7 +57,7 @@ execute `SELECT * FROM test_table WHERE int_column = 1`
 
 ```
 stringParam := "string value"
-stmt, _ := db.PrepareContext(ctx, fmt.Sprintf("SELECT * FROM test_table WHERE string_column = ?"))
+stmt, _ := db.PrepareContext(ctx, "SELECT * FROM test_table WHERE string_column = ?")
 rows, _ := stmt.QueryContext(ctx, stringParam) 
 ```
 execute `SELECT * FROM test_table WHERE string_column = 'string value'`
@@ -70,7 +70,7 @@ If you want to set a parameter for float type column on Athena, please use strin
 ```
 // for float column
 floatParam := "3.144"
-stmt, _ := db.PrepareContext(ctx, fmt.Sprintf("SELECT * FROM test_table WHERE float_column = ?"))
+stmt, _ := db.PrepareContext(ctx, "SELECT * FROM test_table WHERE float_column = ?")
 rows, _ := stmt.QueryContext(ctx, floatParam) 
 ```
 execute SQL `SELECT * FROM test_table WHERE float_column = 3.144`
@@ -89,7 +89,7 @@ If you want to set a numeric value for a string type column on Athena, put true 
 ```
 // for string column
 floatParam := "3.144"
-stmt, _ := db.PrepareContext(ctx, fmt.Sprintf("SELECT * FROM test_table WHERE string_column = ?"))
+stmt, _ := db.PrepareContext(ctx, "SELECT * FROM test_table WHERE string_column = ?")
 ctx = SetForceNumericString(ctx, true) // set true
 rows, _ := stmt.QueryContext(ctx, floatParam) 
 ```
