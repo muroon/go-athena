@@ -63,7 +63,7 @@ Note
 ## Prepared Statements
 
 You can use [Athena Prepared Statements](https://docs.aws.amazon.com/athena/latest/ug/querying-with-prepared-statements.html).
-Click [here](doc/prepare.md) for details on how to use.
+Click [here](doc/prepared_statements.md) for details on how to use.
 
 ## Testing
 
