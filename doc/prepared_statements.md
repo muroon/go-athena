@@ -8,7 +8,7 @@ You can use [Prepared Statements on Athena](https://docs.aws.amazon.com/athena/l
   db, _ := sql.Open("athena", "db=default&output_location=s3://results")
   
   // 1. Prepare 
-  stmt, _ := db.PrepareContext(ctx, fmt.Sprintf("SELECT url, code FROM cloudfront WHERE code = ?"))
+  stmt, _ := db.PrepareContext(ctx, "SELECT url, code FROM cloudfront WHERE code = ?")
   defer stmt.Close() // 3. Close
  
   // 2. Execute
