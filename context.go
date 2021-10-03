@@ -70,20 +70,3 @@ func getCatalog(ctx context.Context) (string, bool) {
 	val, ok := ctx.Value(CatalogContextKey).(string)
 	return val, ok
 }
-
-/*
- * force using string type with numeric string
- */
-const forceNumericContextKey string = "force_numeric_string_key"
-
-// ForceNumericStringContextKey context key of force numeric string
-var ForceNumericStringContextKey = contextPrefix + forceNumericContextKey
-
-func SetForceNumericString(ctx context.Context, val bool) context.Context {
-	return context.WithValue(ctx, ForceNumericStringContextKey, val)
-}
-
-func getForNumericString(ctx context.Context) bool {
-	val, ok := ctx.Value(ForceNumericStringContextKey).(bool)
-	return val && ok
-}

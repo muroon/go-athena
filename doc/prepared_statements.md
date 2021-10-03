@@ -44,60 +44,10 @@ You can use [Prepared Statements on Athena](https://docs.aws.amazon.com/athena/l
 
 ## Examples
 
-#### int parameter
-
 ```
 intParam := 1
-stmt, _ := db.PrepareContext(ctx, "SELECT * FROM test_table WHERE int_column = ?")
-rows, _ := stmt.QueryContext(ctx, intParam) 
-```
-execute `SELECT * FROM test_table WHERE int_column = 1`
-
-#### string parameter
-
-```
 stringParam := "string value"
-stmt, _ := db.PrepareContext(ctx, "SELECT * FROM test_table WHERE string_column = ?")
-rows, _ := stmt.QueryContext(ctx, stringParam) 
+stmt, _ := db.PrepareContext(ctx, "SELECT * FROM test_table WHERE int_column = ? AND string_column = ?")
+rows, _ := stmt.QueryContext(ctx, intParam, stringParam)
 ```
-execute `SELECT * FROM test_table WHERE string_column = 'string value'`
-
-#### float parameter
-
-Neither float32 nor float64 is supported because digit precision will easily cause large problems.
-If you want to set a parameter for float type column on Athena, please use string type parameter whose characters are all numeric.
-
-```
-// for float column
-floatParam := "3.144"
-stmt, _ := db.PrepareContext(ctx, "SELECT * FROM test_table WHERE float_column = ?")
-rows, _ := stmt.QueryContext(ctx, floatParam) 
-```
-execute SQL `SELECT * FROM test_table WHERE float_column = 3.144`
-
-|golang (string)|in SQL|
-| --- | --- |
-|"123"|123|
-|"1.23"|1.23|
-|"1.23a"|'1.23a'|
-
-#### for numeric string parameter 
-
-By default, numeric string parameter isn't converted to string type in SQL, as shown in the float parameter example.
-If you want to set a numeric value for a string type column on Athena, put true in SetForceNumericString function.
-
-```
-// for string column
-floatParam := "3.144"
-stmt, _ := db.PrepareContext(ctx, "SELECT * FROM test_table WHERE string_column = ?")
-ctx = SetForceNumericString(ctx, true) // set true
-rows, _ := stmt.QueryContext(ctx, floatParam) 
-```
-execute SQL `SELECT * FROM test_table WHERE string_column = '3.144'`
-
-**under setting true in SetForceNumericString**
-
-|golang (string)|in SQL|
-| --- | --- |
-|"123"|'123'|
-|"1.23"|'1.23'|
+execute `SELECT * FROM test_table WHERE int_column = 1 and string_column = 'string value'`

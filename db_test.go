@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -229,17 +228,15 @@ func TestPrepare(t *testing.T) {
 		},
 		{
 			name:   "FloatType",
-			sql:    fmt.Sprintf("select * from %s where cast(floattype as decimal(8,7)) = ?", harness.table),
-			params: []interface{}{strconv.FormatFloat(float64(data[0].FloatType), 'f', -1, 32)},
+			sql:    fmt.Sprintf("select * from %s where floattype = ?", harness.table),
+			params: []interface{}{data[0].FloatType},
 			want:   data[0],
 		},
 		{
-			name:      "Numeric String",
-			sql:       fmt.Sprintf("select * from %s where stringType = ?", harness.table),
-			params:    []interface{}{data[2].StringType},
-			startFunc: func(ctx context.Context) context.Context { return SetForceNumericString(ctx, true) },
-			endFunc:   func(ctx context.Context) context.Context { return SetForceNumericString(ctx, false) },
-			want:      data[2],
+			name:   "DoubleType",
+			sql:    fmt.Sprintf("select * from %s where doubletype = ?", harness.table),
+			params: []interface{}{data[0].DoubleType},
+			want:   data[0],
 		},
 	}
 

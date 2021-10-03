@@ -154,13 +154,11 @@ func (s *stmtAthena) runQuery(ctx context.Context, query string) (driver.Rows, e
 }
 
 func serial(ctx context.Context, v interface{}) (string, error) {
-	forceNumericString := getForNumericString(ctx)
-	if !forceNumericString {
-		if x, ok := v.(string); ok {
-			if _, err := strconv.ParseFloat(string(x), 64); err == nil {
-				return presto.Serial(presto.Numeric(x))
-			}
-		}
+	switch x := v.(type) {
+	case float32:
+		return strconv.FormatFloat(float64(x), 'g', -1, 32), nil
+	case float64:
+		return strconv.FormatFloat(x, 'g', -1, 64), nil
 	}
 
 	return presto.Serial(v)

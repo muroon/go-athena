@@ -5,37 +5,6 @@ import (
 	"testing"
 )
 
-func Test_getForNumericString(t *testing.T) {
-	tests := []struct {
-		name string
-		ctx  context.Context
-		want bool
-	}{
-		{
-			name: "Default",
-			ctx:  context.Background(),
-			want: false,
-		},
-		{
-			name: "SetForceNumericString:true",
-			ctx:  SetForceNumericString(context.Background(), true),
-			want: true,
-		},
-		{
-			name: "SetForceNumericString:false",
-			ctx:  SetForceNumericString(context.Background(), false),
-			want: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := getForNumericString(tt.ctx); got != tt.want {
-				t.Errorf("getForNumericString() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func Test_getCatalog(t *testing.T) {
 	tests := []struct {
 		name  string
