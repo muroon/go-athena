@@ -4,9 +4,10 @@ import (
 	"context"
 	"database/sql/driver"
 	"fmt"
-	"github.com/prestodb/presto-go-client/presto"
 	"strconv"
 	"strings"
+
+	"github.com/prestodb/presto-go-client/presto"
 )
 
 type stmtAthena struct {
