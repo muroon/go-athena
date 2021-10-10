@@ -1,3 +1,8 @@
+# V1.0.3 (2021-10-15)
+
+- Add Prepared Statement [#20](https://github.com/speee/go-athena/pull/20)
+- Upgrade packages [#20](https://github.com/speee/go-athena/pull/20)
+
 # V1.0.2 (2021-07-03)
 
 - Add Getting output_location from workgroup [#18](https://github.com/speee/go-athena/pull/18)
