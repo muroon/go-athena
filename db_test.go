@@ -149,6 +149,146 @@ func TestQuery(t *testing.T) {
 		require.Equal(t, 3, index+1, fmt.Sprintf("row count. resultMode:%v", resultMode))
 	}
 }
+
+func TestPrepare(t *testing.T) {
+	harness := setup(t, false)
+	defer harness.teardown()
+
+	data := []dummyRow{
+		{
+			SmallintType:  1,
+			IntType:       2,
+			BigintType:    3,
+			BooleanType:   true,
+			FloatType:     3.1415928,
+			DoubleType:    3141592653589.793,
+			StringType:    "some string",
+			TimestampType: athenaTimestamp(time.Date(2006, 1, 2, 3, 4, 11, 0, time.UTC)),
+			DateType:      athenaDate(time.Date(2006, 1, 2, 0, 0, 0, 0, time.UTC)),
+			DecimalType:   1001,
+		},
+		{
+			SmallintType:  9,
+			IntType:       8,
+			BigintType:    0,
+			BooleanType:   false,
+			FloatType:     3.1415930,
+			DoubleType:    3141592653589.79,
+			StringType:    "another string",
+			TimestampType: athenaTimestamp(time.Date(2017, 12, 3, 1, 11, 12, 0, time.UTC)),
+			DateType:      athenaDate(time.Date(2017, 12, 3, 0, 0, 0, 0, time.UTC)),
+			DecimalType:   0,
+		},
+		{
+			SmallintType:  9,
+			IntType:       8,
+			BigintType:    0,
+			BooleanType:   false,
+			FloatType:     3.14159,
+			DoubleType:    3141592653589.8,
+			StringType:    "123.456",
+			TimestampType: athenaTimestamp(time.Date(2017, 12, 3, 20, 11, 12, 0, time.UTC)),
+			DateType:      athenaDate(time.Date(2017, 12, 3, 0, 0, 0, 0, time.UTC)),
+			DecimalType:   0.48,
+		},
+	}
+	harness.uploadData(data)
+
+	resultModes := []ResultMode{
+		ResultModeAPI,
+		ResultModeDL,
+		ResultModeGzipDL,
+	}
+
+	tests := []struct {
+		name      string
+		sql       string
+		params    []interface{}
+		startFunc func(ctx context.Context) context.Context
+		endFunc   func(ctx context.Context) context.Context
+		want      dummyRow
+	}{
+		{
+			name:   "NoInput",
+			sql:    fmt.Sprintf("select * from %s order by intType limit 1", harness.table),
+			params: []interface{}{},
+			want:   data[0],
+		},
+		{
+			name:   "IntType",
+			sql:    fmt.Sprintf("select * from %s where intType = ?", harness.table),
+			params: []interface{}{data[0].IntType},
+			want:   data[0],
+		},
+		{
+			name:   "StringType",
+			sql:    fmt.Sprintf("select * from %s where stringType = ?", harness.table),
+			params: []interface{}{data[0].StringType},
+			want:   data[0],
+		},
+		{
+			name:   "FloatType",
+			sql:    fmt.Sprintf("select * from %s where floattype = ?", harness.table),
+			params: []interface{}{data[0].FloatType},
+			want:   data[0],
+		},
+		{
+			name:   "DoubleType",
+			sql:    fmt.Sprintf("select * from %s where doubletype = ?", harness.table),
+			params: []interface{}{data[0].DoubleType},
+			want:   data[0],
+		},
+	}
+
+	for _, resultMode := range resultModes {
+		ctx := context.Background()
+		switch resultMode {
+		case ResultModeAPI:
+			ctx = SetAPIMode(ctx)
+		case ResultModeDL:
+			ctx = SetDLMode(ctx)
+		case ResultModeGzipDL:
+			ctx = SetGzipDLMode(ctx)
+		}
+
+		for _, test := range tests {
+			t.Run(fmt.Sprintf("ResultMode:%v/%s", resultMode, test.name), func(t *testing.T) {
+				if startFunc := test.startFunc; startFunc != nil {
+					ctx = startFunc(ctx)
+				}
+				if endFunc := test.startFunc; endFunc != nil {
+					defer func() {
+						ctx = endFunc(ctx)
+					}()
+				}
+
+				stmt, err := harness.prepare(ctx, test.sql)
+				defer func() {
+					err := stmt.Close()
+					require.NoError(t, err)
+				}()
+				require.NoError(t, err)
+
+				rows, err := stmt.QueryContext(ctx, test.params...)
+				defer rows.Close()
+				require.NoError(t, err)
+
+				var length int
+				for rows.Next() {
+					length++
+					var got dummyRow
+					err := rows.Scan(
+						&got.NullValue, &got.SmallintType, &got.IntType, &got.BigintType, &got.BooleanType, &got.FloatType, &got.DoubleType, &got.StringType, &got.TimestampType, &got.DateType, &got.DecimalType,
+					)
+					require.NoError(t, err)
+					assert.Equal(t, test.want, got, fmt.Sprintf("resultMode:%v, prepareIntType error", resultMode))
+				}
+				assert.Equal(t, 1, length)
+			})
+		}
+	}
+}
+
 func TestQueryForUsingWorkGroup(t *testing.T) {
 	resultModes := []ResultMode{
 		ResultModeAPI,
@@ -331,6 +471,10 @@ func (a *athenaHarness) mustQuery(ctx context.Context, sql string, args ...inter
 	rows, err := a.db.QueryContext(ctx, query)
 	require.NoError(a.t, err, query)
 	return rows
+}
+
+func (a *athenaHarness) prepare(ctx context.Context, sql string) (*sql.Stmt, error) {
+	return a.db.PrepareContext(ctx, sql)
 }
 
 func (a *athenaHarness) uploadData(rows []dummyRow) {

@@ -62,7 +62,7 @@ const catalogContextKey string = "catalog_key"
 var CatalogContextKey string = contextPrefix + catalogContextKey
 
 // SetCatalog set catalog from context
-func SetTimout(ctx context.Context, catalog string) context.Context {
+func SetCatalog(ctx context.Context, catalog string) context.Context {
 	return context.WithValue(ctx, CatalogContextKey, catalog)
 }
 
