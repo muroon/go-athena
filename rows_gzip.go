@@ -6,16 +6,17 @@ import (
 	"context"
 	"database/sql/driver"
 	"fmt"
+	"io"
+	"strings"
+	"time"
+	"unicode/utf8"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/athena"
 	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
-	"io"
-	"strings"
-	"time"
-	"unicode/utf8"
 )
 
 const (
@@ -75,6 +76,7 @@ func (r *rowsGzipDL) init(cfg rowsConfig) error {
 	}
 
 	// drop ctas table
+	// TODO: remove this
 	if cfg.AfterDownload != nil {
 		if e := cfg.AfterDownload(); e != nil {
 			return e

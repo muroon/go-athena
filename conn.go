@@ -83,12 +83,13 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 
 	// mode ctas
 	var ctasTable string
-	var afterDownload func() error
+	var afterDownload func() error // TODO: remove this
 	if isCreatingCTASTable(isSelect, resultMode) {
 		// Create AS Select
 		ctasTable = fmt.Sprintf("tmp_ctas_%v", strings.Replace(uuid.NewV4().String(), "-", "", -1))
-		query = fmt.Sprintf("CREATE TABLE %s WITH (format='TEXTFILE') AS %s", ctasTable, query)
-		afterDownload = c.dropCTASTable(ctx, ctasTable)
+		//query = fmt.Sprintf("CREATE TABLE %s WITH (format='TEXTFILE') AS %s", ctasTable, query)
+		query = fmt.Sprintf("UNLOAD (%s) TO '%s' WITH (format='TEXTFILE')", query, c.OutputLocation)
+		//afterDownload = c.dropCTASTable(ctx, ctasTable)
 	}
 
 	queryID, err := c.startQuery(query)
@@ -108,7 +109,7 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 		Session:        c.session,
 		OutputLocation: c.OutputLocation,
 		Timeout:        timeout,
-		AfterDownload:  afterDownload,
+		AfterDownload:  afterDownload, // TODO: remove this
 		CTASTable:      ctasTable,
 		DB:             c.db,
 		Catalog:        catalog,

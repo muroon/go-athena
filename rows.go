@@ -2,6 +2,7 @@ package athena
 
 import (
 	"database/sql/driver"
+
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
 )
@@ -14,7 +15,7 @@ type rowsConfig struct {
 	Session        *session.Session
 	OutputLocation string
 	Timeout        uint
-	AfterDownload  func() error
+	AfterDownload  func() error // TODO: remove this
 	CTASTable      string
 	DB             string
 	Catalog        string
