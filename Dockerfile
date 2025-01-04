@@ -1,4 +1,4 @@
-FROM golang:1.14
+FROM golang:1.23
 
 WORKDIR /go/src/github.com/speee/go-athena
 
