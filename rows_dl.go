@@ -2,23 +2,23 @@ package athena
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"database/sql/driver"
 	"fmt"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/athena"
-	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"io"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/service/athena"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 type rowsDL struct {
-	athena         athenaiface.AthenaAPI
+	athena         *athena.Client
 	queryID        string
 	resultMode     ResultMode
 	out            *athena.GetQueryResultsOutput
@@ -43,7 +43,7 @@ func (r *rowsDL) init(cfg rowsConfig) error {
 	err := make(chan error, 2)
 
 	// download and set in memory
-	go r.downloadCsvAsync(ctx, err, cfg.Session, cfg.OutputLocation)
+	go r.downloadCsvAsync(ctx, err, cfg.AWSConfig, cfg.OutputLocation)
 
 	// get table metadata
 	go r.getQueryResultsAsyncForCsv(ctx, err)
@@ -64,20 +64,25 @@ func (r *rowsDL) init(cfg rowsConfig) error {
 func (r *rowsDL) downloadCsvAsync(
 	ctx context.Context,
 	errCh chan error,
-	sess *session.Session,
+	cfg *aws.Config,
 	location string,
 ) {
-	errCh <- r.downloadCsv(sess, location)
+	errCh <- r.downloadCsv(cfg, location)
 }
 
-func (r *rowsDL) downloadCsv(sess *session.Session, location string) error {
+func (r *rowsDL) downloadCsv(cfg *aws.Config, location string) error {
+	if location[len(location)-1:] == "/" {
+		location = location[:len(location)-1]
+	}
 	// remove the first 5 characters "s3://" from location
 	bucketName := location[5:]
 	objectKey := fmt.Sprintf("%s.csv", r.queryID)
 
-	buff := &aws.WriteAtBuffer{}
-	downloader := s3manager.NewDownloader(sess)
-	_, err := downloader.Download(buff, &s3.GetObjectInput{
+	s3Client := s3.NewFromConfig(*cfg)
+	downloader := manager.NewDownloader(s3Client)
+
+	var buf bytes.Buffer
+	_, err := downloader.Download(context.Background(), &writeAtBuffer{buf: &buf}, &s3.GetObjectInput{
 		Bucket: aws.String(bucketName),
 		Key:    aws.String(objectKey),
 	})
@@ -85,9 +90,7 @@ func (r *rowsDL) downloadCsv(sess *session.Session, location string) error {
 		return err
 	}
 
-	bfData := buff.Bytes()
-
-	fields, err := getRecordsForDL(strings.NewReader(string(bfData)))
+	fields, err := getRecordsForDL(strings.NewReader(buf.String()))
 	if err != nil {
 		return err
 	}
@@ -100,9 +103,9 @@ func (r *rowsDL) downloadCsv(sess *session.Session, location string) error {
 
 func (r *rowsDL) getQueryResultsAsyncForCsv(ctx context.Context, errCh chan error) {
 	var err error
-	r.out, err = r.athena.GetQueryResults(&athena.GetQueryResultsInput{
+	r.out, err = r.athena.GetQueryResults(ctx, &athena.GetQueryResultsInput{
 		QueryExecutionId: aws.String(r.queryID),
-		MaxResults:       aws.Int64(1),
+		MaxResults:       aws.Int32(1),
 	})
 	errCh <- err
 }

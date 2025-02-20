@@ -1,16 +1,16 @@
 package athena
 
 import (
+	"context"
 	"database/sql/driver"
 	"io"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/athena"
-	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/athena"
 )
 
 type rowsAPI struct {
-	athena     athenaiface.AthenaAPI
+	athena     *athena.Client
 	queryID    string
 	resultMode ResultMode
 
@@ -43,7 +43,7 @@ func (r *rowsAPI) init(cfg rowsConfig) error {
 
 func (r *rowsAPI) fetchNextPage(token *string) (bool, error) {
 	var err error
-	r.out, err = r.athena.GetQueryResults(&athena.GetQueryResultsInput{
+	r.out, err = r.athena.GetQueryResults(context.Background(), &athena.GetQueryResultsInput{
 		QueryExecutionId: aws.String(r.queryID),
 		NextToken:        token,
 	})

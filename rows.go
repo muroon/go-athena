@@ -1,17 +1,29 @@
 package athena
 
 import (
+	"bytes"
 	"database/sql/driver"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/athena"
 )
 
+// writeAtBuffer implements io.WriterAt for a buffer
+type writeAtBuffer struct {
+	buf *bytes.Buffer
+}
+
+func (w *writeAtBuffer) WriteAt(p []byte, off int64) (n int, err error) {
+	// Note that we ignore the offset as we are just appending
+	return w.buf.Write(p)
+}
+
 type rowsConfig struct {
-	Athena         athenaiface.AthenaAPI
+	Athena         *athena.Client
 	QueryID        string
 	SkipHeader     bool
 	ResultMode     ResultMode
-	Session        *session.Session
+	AWSConfig      *aws.Config
 	OutputLocation string
 	Timeout        uint
 	AfterDownload  func() error

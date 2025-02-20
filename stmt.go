@@ -122,9 +122,9 @@ func (s *stmtAthena) runQuery(ctx context.Context, query string) (driver.Rows, e
 	}
 
 	// output location (with empty value)
-	if checkOutputLocation(s.resultMode, s.conn.OutputLocation) {
+	if checkOutputLocation(s.resultMode, s.conn.outputLocation) {
 		var err error
-		s.conn.OutputLocation, err = getOutputLocation(s.conn.athena, s.conn.workgroup)
+		s.conn.outputLocation, err = getOutputLocation(s.conn.athena, s.conn.workgroup)
 		if err != nil {
 			return nil, err
 		}
@@ -144,12 +144,11 @@ func (s *stmtAthena) runQuery(ctx context.Context, query string) (driver.Rows, e
 		QueryID:        queryID,
 		SkipHeader:     !isDDLQuery(query),
 		ResultMode:     s.resultMode,
-		Session:        s.conn.session,
-		OutputLocation: s.conn.OutputLocation,
+		OutputLocation: s.conn.outputLocation,
 		Timeout:        timeout,
 		AfterDownload:  s.afterDownload,
 		CTASTable:      s.ctasTable,
-		DB:             s.conn.db,
+		DB:             s.conn.database,
 		Catalog:        catalog,
 	})
 }

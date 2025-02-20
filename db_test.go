@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	uuid "github.com/satori/go.uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -323,11 +323,6 @@ func TestQueryForUsingWorkGroup(t *testing.T) {
 }
 
 func TestOpen(t *testing.T) {
-	var acfg []*aws.Config
-	acfg = append(acfg, &aws.Config{Region: aws.String(AwsRegion)})
-	session, err := session.NewSession(acfg...)
-	require.NoError(t, err, "Query")
-
 	resultModes := []ResultMode{
 		ResultModeAPI,
 		ResultModeDL,
@@ -340,19 +335,16 @@ func TestOpen(t *testing.T) {
 	}
 
 	for _, s3Bucket := range s3Buckes {
-		config := Config{
-			Session:   session,
-			Database:  AthenaDatabase,
-			WorkGroup: WorkGroup,
-			Timeout:   timeOutLimitDefault,
-		}
-		if s3Bucket != "" {
-			config.OutputLocation = fmt.Sprintf("s3://%s", s3Bucket)
-		}
-
 		for _, resultMode := range resultModes {
-			config.ResultMode = resultMode
-			db, err := Open(config)
+			connStr := fmt.Sprintf("db=%s&region=%s", AthenaDatabase, AwsRegion)
+			if s3Bucket != "" {
+				connStr += fmt.Sprintf("&output_location=s3://%s", s3Bucket)
+			}
+			if resultMode != ResultModeAPI {
+				connStr += fmt.Sprintf("&result_mode=%s", getResultModeString(resultMode))
+			}
+
+			db, err := sql.Open("athena", connStr)
 			require.NoError(t, err, fmt.Sprintf("Open. resultMode:%v", resultMode))
 
 			ctx := context.Background()
@@ -363,6 +355,17 @@ func TestOpen(t *testing.T) {
 				require.NoError(t, err, fmt.Sprintf("Query IN resultMode:%v", resultMode))
 			}
 		}
+	}
+}
+
+func getResultModeString(mode ResultMode) string {
+	switch mode {
+	case ResultModeDL:
+		return "dl"
+	case ResultModeGzipDL:
+		return "gzip"
+	default:
+		return ""
 	}
 }
 
@@ -402,29 +405,22 @@ type dummyRow struct {
 }
 
 type athenaHarness struct {
-	t    *testing.T
-	db   *sql.DB
-	sess *session.Session
+	t      *testing.T
+	db     *sql.DB
+	config aws.Config
 
 	table string
 }
 
 func setup(t *testing.T, useWorkGroup bool) *athenaHarness {
-	var acfg []*aws.Config
-	acfg = append(acfg, &aws.Config{
-		Region: aws.String(AwsRegion),
-	})
-	sess, err := session.NewSession(acfg...)
-	if err != nil {
-		require.NoError(t, err)
-	}
-	harness := athenaHarness{t: t, sess: sess}
+	harness := athenaHarness{t: t}
 
 	connStr := fmt.Sprintf("db=%s&output_location=s3://%s&region=%s", AthenaDatabase, S3Bucket, AwsRegion)
 	if useWorkGroup {
 		connStr = fmt.Sprintf("db=%s&region=%s&workgroup=%s", AthenaDatabase, AwsRegion, WorkGroup)
 	}
 
+	var err error
 	harness.db, err = sql.Open("athena", connStr)
 	require.NoError(t, err)
 
@@ -485,9 +481,10 @@ func (a *athenaHarness) uploadData(rows []dummyRow) {
 		require.NoError(a.t, err)
 	}
 
-	uploader := s3manager.NewUploader(a.sess)
+	s3Client := s3.NewFromConfig(a.config)
+	uploader := manager.NewUploader(s3Client)
 
-	_, err := uploader.Upload(&s3manager.UploadInput{
+	_, err := uploader.Upload(context.TODO(), &s3.PutObjectInput{
 		Bucket: aws.String(S3Bucket),
 		Key:    aws.String(fmt.Sprintf("%s/fixture.json", a.table)),
 		Body:   bytes.NewReader(buf.Bytes()),

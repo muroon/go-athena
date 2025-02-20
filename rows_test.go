@@ -1,6 +1,7 @@
 package athena
 
 import (
+	"context"
 	"database/sql/driver"
 	"errors"
 	"io"
@@ -8,14 +9,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/service/athena"
-	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
+	"github.com/aws/aws-sdk-go-v2/service/athena"
+	"github.com/aws/aws-sdk-go-v2/service/athena/types"
 	"github.com/stretchr/testify/assert"
 )
 
 var dummyError = errors.New("dummy error")
 
-type genQueryResultsOutputByToken func(token string) (*athena.GetQueryResultsOutput, error)
+type genQueryResultsOutputByToken func(token *string) (*athena.GetQueryResultsOutput, error)
 
 var queryToResultsGenMap = map[string]genQueryResultsOutputByToken{
 	"select":         dummySelectQueryResponse,
@@ -24,22 +25,22 @@ var queryToResultsGenMap = map[string]genQueryResultsOutputByToken{
 	"iteration_fail": dummyFailedIterationResponse,
 }
 
-func genColumnInfo(column string) *athena.ColumnInfo {
+func genColumnInfo(column string) types.ColumnInfo {
 	caseSensitive := true
 	catalogName := "hive"
-	nullable := "UNKNOWN"
-	precision := int64(2147483647)
-	scale := int64(0)
+	nullable := types.ColumnNullableUnknown
+	precision := int32(2147483647)
+	scale := int32(0)
 	schemaName := ""
 	tableName := ""
 	columnType := "varchar"
 
-	return &athena.ColumnInfo{
-		CaseSensitive: &caseSensitive,
+	return types.ColumnInfo{
+		CaseSensitive: caseSensitive,
 		CatalogName:   &catalogName,
-		Nullable:      &nullable,
-		Precision:     &precision,
-		Scale:         &scale,
+		Nullable:      nullable,
+		Precision:     precision,
+		Scale:         scale,
 		SchemaName:    &schemaName,
 		TableName:     &tableName,
 		Type:          &columnType,
@@ -57,40 +58,44 @@ func randomString() string {
 	return string(s)
 }
 
-func genRow(isHeader bool, columns []*athena.ColumnInfo) *athena.Row {
-	var data []*athena.Datum
+func genRow(isHeader bool, columns []types.ColumnInfo) types.Row {
+	var data []types.Datum
 	for i := 0; i < len(columns); i++ {
 		if isHeader {
-			data = append(data, &athena.Datum{
+			data = append(data, types.Datum{
 				VarCharValue: columns[i].Name,
 			})
 		} else {
 			s := randomString()
-			data = append(data, &athena.Datum{
+			data = append(data, types.Datum{
 				VarCharValue: &s,
 			})
 		}
 	}
-	return &athena.Row{
+	return types.Row{
 		Data: data,
 	}
 }
 
-func dummySelectQueryResponse(token string) (*athena.GetQueryResultsOutput, error) {
-	switch token {
+func dummySelectQueryResponse(token *string) (*athena.GetQueryResultsOutput, error) {
+	tokenStr := ""
+	if token != nil {
+		tokenStr = *token
+	}
+	switch tokenStr {
 	case "":
-		var nextToken = "page_1"
-		columns := []*athena.ColumnInfo{
+		nextToken := "page_1"
+		columns := []types.ColumnInfo{
 			genColumnInfo("first_name"),
 			genColumnInfo("last_name"),
 		}
 		return &athena.GetQueryResultsOutput{
 			NextToken: &nextToken,
-			ResultSet: &athena.ResultSet{
-				ResultSetMetadata: &athena.ResultSetMetadata{
+			ResultSet: &types.ResultSet{
+				ResultSetMetadata: &types.ResultSetMetadata{
 					ColumnInfo: columns,
 				},
-				Rows: []*athena.Row{
+				Rows: []types.Row{
 					genRow(true, columns),
 					genRow(false, columns),
 					genRow(false, columns),
@@ -100,16 +105,16 @@ func dummySelectQueryResponse(token string) (*athena.GetQueryResultsOutput, erro
 			},
 		}, nil
 	case "page_1":
-		columns := []*athena.ColumnInfo{
+		columns := []types.ColumnInfo{
 			genColumnInfo("first_name"),
 			genColumnInfo("last_name"),
 		}
 		return &athena.GetQueryResultsOutput{
-			ResultSet: &athena.ResultSet{
-				ResultSetMetadata: &athena.ResultSetMetadata{
+			ResultSet: &types.ResultSet{
+				ResultSetMetadata: &types.ResultSetMetadata{
 					ColumnInfo: columns,
 				},
-				Rows: []*athena.Row{
+				Rows: []types.Row{
 					genRow(false, columns),
 					genRow(false, columns),
 					genRow(false, columns),
@@ -123,38 +128,33 @@ func dummySelectQueryResponse(token string) (*athena.GetQueryResultsOutput, erro
 	}
 }
 
-func dummySelectZeroQueryResponse(token string) (*athena.GetQueryResultsOutput, error) {
-	switch token {
-	case "":
-		columns := []*athena.ColumnInfo{
-			genColumnInfo("first_name"),
-			genColumnInfo("last_name"),
-		}
-		return &athena.GetQueryResultsOutput{
-			ResultSet: &athena.ResultSet{
-				ResultSetMetadata: &athena.ResultSetMetadata{
-					ColumnInfo: columns,
-				},
-				Rows: []*athena.Row{
-					genRow(true, columns),
-				},
-			},
-		}, nil
-	default:
-		return nil, dummyError
+func dummySelectZeroQueryResponse(token *string) (*athena.GetQueryResultsOutput, error) {
+	columns := []types.ColumnInfo{
+		genColumnInfo("first_name"),
+		genColumnInfo("last_name"),
 	}
+	return &athena.GetQueryResultsOutput{
+		ResultSet: &types.ResultSet{
+			ResultSetMetadata: &types.ResultSetMetadata{
+				ColumnInfo: columns,
+			},
+			Rows: []types.Row{
+				genRow(true, columns),
+			},
+		},
+	}, nil
 }
 
-func dummyShowResponse(_ string) (*athena.GetQueryResultsOutput, error) {
-	columns := []*athena.ColumnInfo{
+func dummyShowResponse(_ *string) (*athena.GetQueryResultsOutput, error) {
+	columns := []types.ColumnInfo{
 		genColumnInfo("partition"),
 	}
 	return &athena.GetQueryResultsOutput{
-		ResultSet: &athena.ResultSet{
-			ResultSetMetadata: &athena.ResultSetMetadata{
+		ResultSet: &types.ResultSet{
+			ResultSetMetadata: &types.ResultSetMetadata{
 				ColumnInfo: columns,
 			},
-			Rows: []*athena.Row{
+			Rows: []types.Row{
 				genRow(false, columns),
 				genRow(false, columns),
 			},
@@ -162,21 +162,25 @@ func dummyShowResponse(_ string) (*athena.GetQueryResultsOutput, error) {
 	}, nil
 }
 
-func dummyFailedIterationResponse(token string) (*athena.GetQueryResultsOutput, error) {
-	switch token {
+func dummyFailedIterationResponse(token *string) (*athena.GetQueryResultsOutput, error) {
+	tokenStr := ""
+	if token != nil {
+		tokenStr = *token
+	}
+	switch tokenStr {
 	case "":
-		var nextToken = "page_1"
-		columns := []*athena.ColumnInfo{
+		nextToken := "page_1"
+		columns := []types.ColumnInfo{
 			genColumnInfo("first_name"),
 			genColumnInfo("last_name"),
 		}
 		return &athena.GetQueryResultsOutput{
 			NextToken: &nextToken,
-			ResultSet: &athena.ResultSet{
-				ResultSetMetadata: &athena.ResultSetMetadata{
+			ResultSet: &types.ResultSet{
+				ResultSetMetadata: &types.ResultSetMetadata{
 					ColumnInfo: columns,
 				},
-				Rows: []*athena.Row{
+				Rows: []types.Row{
 					genRow(true, columns),
 					genRow(false, columns),
 					genRow(false, columns),
@@ -191,15 +195,15 @@ func dummyFailedIterationResponse(token string) (*athena.GetQueryResultsOutput, 
 }
 
 type mockAthenaClient struct {
-	athenaiface.AthenaAPI
+	*athena.Client
 }
 
-func (m *mockAthenaClient) GetQueryResults(query *athena.GetQueryResultsInput) (*athena.GetQueryResultsOutput, error) {
-	var nextToken = ""
-	if query.NextToken != nil {
-		nextToken = *query.NextToken
-	}
-	return queryToResultsGenMap[*query.QueryExecutionId](nextToken)
+func NewMockAthenaClient() *athena.Client {
+	return &athena.Client{}
+}
+
+func (m *mockAthenaClient) GetQueryResults(ctx context.Context, params *athena.GetQueryResultsInput, optFns ...func(*athena.Options)) (*athena.GetQueryResultsOutput, error) {
+	return queryToResultsGenMap[*params.QueryExecutionId](params.NextToken)
 }
 
 func castToValue(dest ...driver.Value) []driver.Value {
@@ -244,7 +248,7 @@ func TestRows_Next(t *testing.T) {
 	}
 	for _, test := range tests {
 		r, _ := newRows(rowsConfig{
-			Athena:     new(mockAthenaClient),
+			Athena:     NewMockAthenaClient(),
 			QueryID:    test.queryID,
 			SkipHeader: test.skipHeader,
 		})
