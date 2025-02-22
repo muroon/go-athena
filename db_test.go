@@ -413,7 +413,12 @@ type athenaHarness struct {
 }
 
 func setup(t *testing.T, useWorkGroup bool) *athenaHarness {
-	harness := athenaHarness{t: t}
+	harness := athenaHarness{
+		t: t,
+		config: aws.Config{
+			Region: AwsRegion,
+		},
+	}
 
 	connStr := fmt.Sprintf("db=%s&output_location=s3://%s&region=%s", AthenaDatabase, S3Bucket, AwsRegion)
 	if useWorkGroup {
