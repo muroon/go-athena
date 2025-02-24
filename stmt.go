@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/pkg/errors"
 	"github.com/prestodb/presto-go-client/presto"
 )
 
@@ -39,10 +40,10 @@ func (s *stmtAthena) Exec(args []driver.Value) (driver.Result, error) {
 
 	query, err := s.makeQuery(ctx, values)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to make execution query")
 	}
 	_, err = s.runQuery(ctx, query)
-	return nil, err
+	return nil, errors.Wrap(err, "failed to run exec query")
 }
 
 func (s *stmtAthena) Query(args []driver.Value) (driver.Rows, error) {
@@ -55,7 +56,7 @@ func (s *stmtAthena) Query(args []driver.Value) (driver.Rows, error) {
 
 	query, err := s.makeQuery(ctx, values)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to make query")
 	}
 	return s.runQuery(ctx, query)
 }
@@ -68,10 +69,10 @@ func (s *stmtAthena) ExecContext(ctx context.Context, args []driver.NamedValue) 
 
 	query, err := s.makeQuery(ctx, values)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to make exec context query")
 	}
 	_, err = s.runQuery(ctx, query)
-	return nil, err
+	return nil, errors.Wrap(err, "failed to run exec context query")
 }
 
 func (s *stmtAthena) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
@@ -82,20 +83,18 @@ func (s *stmtAthena) QueryContext(ctx context.Context, args []driver.NamedValue)
 
 	query, err := s.makeQuery(ctx, values)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to make query context")
 	}
 	return s.runQuery(ctx, query)
 }
 
 func (s *stmtAthena) makeQuery(ctx context.Context, args []interface{}) (string, error) {
 	params := make([]string, 0, len(args))
-	for _, arg := range args {
-		var param string
+	for i, arg := range args {
 		param, err := serial(ctx, arg)
 		if err != nil {
-			return "", err
+			return "", errors.Wrapf(err, "failed to serialize parameter at index %d", i)
 		}
-
 		params = append(params, param)
 	}
 
@@ -126,17 +125,17 @@ func (s *stmtAthena) runQuery(ctx context.Context, query string) (driver.Rows, e
 		var err error
 		s.conn.outputLocation, err = getOutputLocation(s.conn.athena, s.conn.workgroup)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to get output location")
 		}
 	}
 
 	queryID, err := s.conn.startQuery(query)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to start query")
 	}
 
 	if err := s.conn.waitOnQuery(ctx, queryID); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to wait for query completion")
 	}
 
 	return newRows(rowsConfig{
@@ -161,5 +160,9 @@ func serial(ctx context.Context, v interface{}) (string, error) {
 		return strconv.FormatFloat(x, 'g', -1, 64), nil
 	}
 
-	return presto.Serial(v)
+	result, err := presto.Serial(v)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to serialize value")
+	}
+	return result, nil
 }

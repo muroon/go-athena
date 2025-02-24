@@ -2,11 +2,11 @@ package athena
 
 import (
 	"database/sql/driver"
-	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/athena/types"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -18,97 +18,121 @@ const (
 
 const nullStringResultModeGzipDL string = "\\N"
 
-func convertRow(columns []types.ColumnInfo, in []types.Datum, ret []driver.Value) error {
-	for i, val := range in {
-		coerced, err := convertValue(*columns[i].Type, val.VarCharValue)
-		if err != nil {
-			return err
+func convertRow(columns []types.ColumnInfo, data []types.Datum, dest []driver.Value) error {
+	for i := range data {
+		if i >= len(dest) {
+			return errors.New("destination slice is too short")
 		}
 
-		ret[i] = coerced
-	}
+		if data[i].VarCharValue == nil {
+			dest[i] = nil
+			continue
+		}
 
+		colType := ""
+		if i < len(columns) && columns[i].Type != nil {
+			colType = *columns[i].Type
+		}
+
+		v, err := convertValueByColumnType(*data[i].VarCharValue, colType)
+		if err != nil {
+			return errors.Wrapf(err, "failed to convert value at index %d", i)
+		}
+		dest[i] = v
+	}
 	return nil
 }
 
-func convertRowFromTableInfo(columns []types.Column, in []string, ret []driver.Value) error {
-	for i, val := range in {
-		var coerced interface{}
-		var err error
-		if val == nullStringResultModeGzipDL {
-			var nullVal *string
-			coerced, err = convertValue(*columns[i].Type, nullVal)
-		} else {
-			coerced, err = convertValue(*columns[i].Type, &val)
+func convertRowFromCsv(columns []types.ColumnInfo, fields []downloadField, dest []driver.Value) error {
+	for i := range fields {
+		if i >= len(dest) {
+			return errors.New("destination slice is too short")
 		}
+
+		if fields[i].isNil {
+			dest[i] = nil
+			continue
+		}
+
+		colType := ""
+		if i < len(columns) && columns[i].Type != nil {
+			colType = *columns[i].Type
+		}
+
+		v, err := convertValueByColumnType(fields[i].val, colType)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "failed to convert CSV value at index %d", i)
 		}
-
-		ret[i] = coerced
+		dest[i] = v
 	}
-
 	return nil
 }
 
-func convertRowFromCsv(columns []types.ColumnInfo, in []downloadField, ret []driver.Value) error {
-	for i, df := range in {
-		var coerced interface{}
-		var err error
-		if df.isNil {
-			var nullVal *string
-			coerced, err = convertValue(*columns[i].Type, nullVal)
-		} else {
-			coerced, err = convertValue(*columns[i].Type, &df.val)
+func convertRowFromTableInfo(columns []types.Column, raw []string, dest []driver.Value) error {
+	for i := range raw {
+		if i >= len(dest) {
+			return errors.New("destination slice is too short")
 		}
+
+		colType := ""
+		if i < len(columns) && columns[i].Type != nil {
+			colType = *columns[i].Type
+		}
+
+		v, err := convertValueByColumnType(raw[i], colType)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "failed to convert table value at index %d", i)
 		}
-
-		ret[i] = coerced
+		dest[i] = v
 	}
-
 	return nil
 }
 
-func convertValue(athenaType string, rawValue *string) (interface{}, error) {
-	if rawValue == nil {
-		return nil, nil
-	}
-
-	if len(athenaType) > 7 && athenaType[:7] == "decimal" {
-		athenaType = "decimal"
-	}
-
-	val := *rawValue
-	switch athenaType {
-	case "smallint":
-		return strconv.ParseInt(val, 10, 16)
-	case "integer", "int":
-		return strconv.ParseInt(val, 10, 32)
+func convertValueByColumnType(s string, columnType string) (interface{}, error) {
+	switch columnType {
+	case "tinyint", "smallint", "integer", "int":
+		i, err := strconv.ParseInt(s, 10, 32)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse integer value: %s", s)
+		}
+		return int32(i), nil
 	case "bigint":
-		return strconv.ParseInt(val, 10, 64)
-	case "boolean":
-		switch val {
-		case "true":
-			return true, nil
-		case "false":
-			return false, nil
+		i, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse bigint value: %s", s)
 		}
-		return nil, fmt.Errorf("cannot parse '%s' as boolean", val)
-	case "float":
-		return strconv.ParseFloat(val, 32)
-	case "double", "decimal":
-		return strconv.ParseFloat(val, 64)
-	case "varchar", "string":
-		return val, nil
+		return i, nil
+	case "double", "float":
+		f, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse float value: %s", s)
+		}
+		return f, nil
+	case "boolean":
+		b, err := strconv.ParseBool(s)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse boolean value: %s", s)
+		}
+		return b, nil
 	case "timestamp":
-		return time.Parse(TimestampLayout, val)
+		t, err := time.Parse(TimestampLayout, s)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse timestamp value: %s", s)
+		}
+		return t, nil
 	case "timestamp with time zone":
-		return time.Parse(TimestampWithTimeZoneLayout, val)
+		t, err := time.Parse(TimestampWithTimeZoneLayout, s)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse timestamp value: %s", s)
+		}
+		return t, nil
 	case "date":
-		return time.Parse(DateLayout, val)
+		t, err := time.Parse(DateLayout, s)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse date value: %s", s)
+		}
+		return t, nil
 	default:
-		panic(fmt.Errorf("unknown type `%s` with value %s", athenaType, val))
+		return s, nil
 	}
 }

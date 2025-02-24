@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/athena"
 	"github.com/aws/aws-sdk-go-v2/service/athena/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/pkg/errors"
 )
 
 type rowsGzipDL struct {
@@ -60,10 +61,10 @@ func (r *rowsGzipDL) init(cfg rowsConfig) error {
 	for i := 0; i < 2; i++ {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return errors.Wrap(ctx.Err(), "context deadline exceeded")
 		case e := <-err:
 			if e != nil {
-				return e
+				return errors.Wrap(e, "async operation failed")
 			}
 		}
 	}
@@ -71,7 +72,7 @@ func (r *rowsGzipDL) init(cfg rowsConfig) error {
 	// drop ctas table
 	if cfg.AfterDownload != nil {
 		if e := cfg.AfterDownload(); e != nil {
-			return e
+			return errors.Wrap(e, "after download hook failed")
 		}
 	}
 
@@ -103,13 +104,13 @@ func (r *rowsGzipDL) downloadCompressedData(cfg *aws.Config, location string) er
 		Key:    aws.String(fmt.Sprintf("tables/%s-manifest.csv", r.queryID)),
 	})
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to download manifest file")
 	}
 
 	start := len(location) + 1
 	objectKeys, err := getObjectKeysForGzip(strings.NewReader(buf.String()), start)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to get object keys from manifest")
 	}
 
 	for _, objectKey := range objectKeys {
@@ -119,17 +120,17 @@ func (r *rowsGzipDL) downloadCompressedData(cfg *aws.Config, location string) er
 			Key:    aws.String(objectKey),
 		})
 		if err != nil {
-			return err
+			return errors.Wrap(err, "failed to download data file")
 		}
 
 		gzipReader, err := gzip.NewReader(strings.NewReader(buf.String()))
 		if err != nil {
-			return err
+			return errors.Wrap(err, "failed to create gzip reader")
 		}
 
 		datas, err := getRecordsFromGzip(gzipReader)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "failed to read gzipped records")
 		}
 		if r.downloadedRows == nil {
 			r.downloadedRows = &downloadedRows{
@@ -151,7 +152,7 @@ func (r *rowsGzipDL) getTableAsync(ctx context.Context, errCh chan error) {
 
 	output, err := r.athena.GetTableMetadata(ctx, input)
 	if err != nil {
-		errCh <- err
+		errCh <- errors.Wrap(err, "failed to get table metadata")
 		return
 	}
 
@@ -166,7 +167,7 @@ func (r *rowsGzipDL) nextCTAS(dest []driver.Value) error {
 
 	row := r.downloadedRows.data[r.downloadedRows.cursor]
 	if err := convertRowFromTableInfo(r.ctasTableColumns, row, dest); err != nil {
-		return err
+		return errors.Wrap(err, "failed to convert row from table info")
 	}
 
 	r.downloadedRows.cursor++

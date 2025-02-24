@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"errors"
-	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -15,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/athena"
 	"github.com/aws/aws-sdk-go-v2/service/athena/types"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -29,7 +28,7 @@ type Driver struct{}
 func (d *Driver) Open(name string) (driver.Conn, error) {
 	connector, err := Open(name)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to parse config")
 	}
 	return connector.Connect(context.Background())
 }
@@ -91,14 +90,14 @@ type Config struct {
 func configFromConnectionString(connStr string) (*Config, error) {
 	args, err := url.ParseQuery(connStr)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to parse connection string")
 	}
 
 	var cfg Config
 
 	awsCfg, err := config.LoadDefaultConfig(context.Background())
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to load AWS config")
 	}
 	if region := args.Get("region"); region != "" {
 		awsCfg.Region = region
@@ -116,7 +115,7 @@ func configFromConnectionString(connStr string) (*Config, error) {
 	if frequencyStr != "" {
 		cfg.PollFrequency, err = time.ParseDuration(frequencyStr)
 		if err != nil {
-			return nil, fmt.Errorf("invalid poll_frequency parameter: %s", frequencyStr)
+			return nil, errors.Wrapf(err, "invalid poll_frequency parameter: %s", frequencyStr)
 		}
 	}
 
@@ -178,7 +177,7 @@ func (c *conn) QueryContext(ctx context.Context, query string, args []driver.Nam
 
 	output, err := c.athena.StartQueryExecution(ctx, input)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to start query execution")
 	}
 
 	queryID := aws.ToString(output.QueryExecutionId)

@@ -3,7 +3,6 @@ package athena
 import (
 	"context"
 	"database/sql/driver"
-	"errors"
 	"io"
 	"math/rand"
 	"strings"
@@ -11,10 +10,11 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/athena"
 	"github.com/aws/aws-sdk-go-v2/service/athena/types"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 )
 
-var dummyError = errors.New("dummy error")
+var dummyError = errors.New("athena query execution failed: test error with stack trace")
 
 type genQueryResultsOutputByToken func(token *string) (*athena.GetQueryResultsOutput, error)
 
@@ -203,7 +203,11 @@ func NewMockAthenaClient() *athena.Client {
 }
 
 func (m *mockAthenaClient) GetQueryResults(ctx context.Context, params *athena.GetQueryResultsInput, optFns ...func(*athena.Options)) (*athena.GetQueryResultsOutput, error) {
-	return queryToResultsGenMap[*params.QueryExecutionId](params.NextToken)
+	output, err := queryToResultsGenMap[*params.QueryExecutionId](params.NextToken)
+	if err != nil {
+		return nil, errors.Wrap(err, "mock query execution failed")
+	}
+	return output, nil
 }
 
 func castToValue(dest ...driver.Value) []driver.Value {

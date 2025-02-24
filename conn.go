@@ -3,17 +3,16 @@ package athena
 import (
 	"context"
 	"database/sql/driver"
-	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 	"time"
 
-	uuid "github.com/satori/go.uuid"
-
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/athena"
 	"github.com/aws/aws-sdk-go-v2/service/athena/types"
+	"github.com/pkg/errors"
+	uuid "github.com/satori/go.uuid"
 )
 
 func (c *conn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
@@ -53,7 +52,7 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 		var err error
 		c.outputLocation, err = getOutputLocation(c.athena, c.workgroup)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to get output location")
 		}
 	}
 
@@ -69,11 +68,11 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 
 	queryID, err := c.startQuery(query)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to start query")
 	}
 
 	if err := c.waitOnQuery(ctx, queryID); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to wait for query completion")
 	}
 
 	return newRows(rowsConfig{
@@ -96,10 +95,10 @@ func (c *conn) dropCTASTable(ctx context.Context, table string) func() error {
 
 		queryID, err := c.startQuery(query)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "failed to start drop table query for %s", table)
 		}
 
-		return c.waitOnQuery(ctx, queryID)
+		return errors.Wrapf(c.waitOnQuery(ctx, queryID), "failed to wait for drop table completion for %s", table)
 	}
 }
 
@@ -116,7 +115,7 @@ func (c *conn) startQuery(query string) (string, error) {
 		WorkGroup: aws.String(c.workgroup),
 	})
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "failed to start query execution")
 	}
 
 	return *resp.QueryExecutionId, nil
@@ -129,15 +128,15 @@ func (c *conn) waitOnQuery(ctx context.Context, queryID string) error {
 			QueryExecutionId: aws.String(queryID),
 		})
 		if err != nil {
-			return err
+			return errors.Wrap(err, "failed to get query execution status")
 		}
 
 		switch statusResp.QueryExecution.Status.State {
 		case types.QueryExecutionStateCancelled:
-			return context.Canceled
+			return errors.New("query execution was cancelled")
 		case types.QueryExecutionStateFailed:
 			reason := *statusResp.QueryExecution.Status.StateChangeReason
-			return errors.New(reason)
+			return errors.Errorf("query execution failed: %s", reason)
 		case types.QueryExecutionStateSucceeded:
 			return nil
 		case types.QueryExecutionStateQueued:
@@ -146,11 +145,13 @@ func (c *conn) waitOnQuery(ctx context.Context, queryID string) error {
 
 		select {
 		case <-ctx.Done():
-			c.athena.StopQueryExecution(context.TODO(), &athena.StopQueryExecutionInput{
+			_, err := c.athena.StopQueryExecution(context.TODO(), &athena.StopQueryExecutionInput{
 				QueryExecutionId: aws.String(queryID),
 			})
-
-			return ctx.Err()
+			if err != nil {
+				return errors.Wrap(err, "failed to stop query execution after context cancellation")
+			}
+			return errors.Wrap(ctx.Err(), "context cancelled while waiting for query")
 		case <-time.After(c.pollFrequency):
 			continue
 		}
@@ -206,11 +207,11 @@ func (c *conn) prepareContext(ctx context.Context, query string) (driver.Stmt, e
 
 	queryID, err := c.startQuery(newQuery)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to start prepare statement query")
 	}
 
 	if err := c.waitOnQuery(ctx, queryID); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to wait for prepare statement completion")
 	}
 
 	return &stmtAthena{

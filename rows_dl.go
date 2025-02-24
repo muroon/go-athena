@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/athena"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/pkg/errors"
 )
 
 type rowsDL struct {
@@ -51,10 +52,10 @@ func (r *rowsDL) init(cfg rowsConfig) error {
 	for i := 0; i < 2; i++ {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return errors.Wrap(ctx.Err(), "context deadline exceeded")
 		case e := <-err:
 			if e != nil {
-				return e
+				return errors.Wrap(e, "async operation failed")
 			}
 		}
 	}
@@ -87,12 +88,12 @@ func (r *rowsDL) downloadCsv(cfg *aws.Config, location string) error {
 		Key:    aws.String(objectKey),
 	})
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to download CSV from S3")
 	}
 
 	fields, err := getRecordsForDL(strings.NewReader(buf.String()))
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to parse CSV records")
 	}
 	r.downloadedRows = &downloadedRows{
 		field: fields[1:],
@@ -107,7 +108,11 @@ func (r *rowsDL) getQueryResultsAsyncForCsv(ctx context.Context, errCh chan erro
 		QueryExecutionId: aws.String(r.queryID),
 		MaxResults:       aws.Int32(1),
 	})
-	errCh <- err
+	if err != nil {
+		errCh <- errors.Wrap(err, "failed to get query results")
+		return
+	}
+	errCh <- nil
 }
 
 func (r *rowsDL) nextDownload(dest []driver.Value) error {
@@ -117,7 +122,7 @@ func (r *rowsDL) nextDownload(dest []driver.Value) error {
 	row := r.downloadedRows.field[r.downloadedRows.cursor]
 	columns := r.out.ResultSet.ResultSetMetadata.ColumnInfo
 	if err := convertRowFromCsv(columns, row, dest); err != nil {
-		return err
+		return errors.Wrap(err, "failed to convert row from CSV")
 	}
 
 	r.downloadedRows.cursor++

@@ -7,6 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/athena"
+	"github.com/pkg/errors"
 )
 
 type rowsAPI struct {
@@ -34,7 +35,7 @@ func newRowsAPI(cfg rowsConfig) (*rowsAPI, error) {
 func (r *rowsAPI) init(cfg rowsConfig) error {
 	shouldContinue, err := r.fetchNextPage(nil)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to fetch next page")
 	}
 
 	r.done = !shouldContinue
@@ -48,7 +49,7 @@ func (r *rowsAPI) fetchNextPage(token *string) (bool, error) {
 		NextToken:        token,
 	})
 	if err != nil {
-		return false, err
+		return false, errors.Wrap(err, "failed to get query results")
 	}
 
 	var rowOffset = 0
@@ -81,7 +82,7 @@ func (r *rowsAPI) nextAPI(dest []driver.Value) error {
 
 		cont, err := r.fetchNextPage(r.out.NextToken)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "failed to fetch next page")
 		}
 
 		if !cont {
@@ -93,7 +94,7 @@ func (r *rowsAPI) nextAPI(dest []driver.Value) error {
 	cur := r.out.ResultSet.Rows[0]
 	columns := r.out.ResultSet.ResultSetMetadata.ColumnInfo
 	if err := convertRow(columns, cur.Data, dest); err != nil {
-		return err
+		return errors.Wrap(err, "failed to convert row")
 	}
 
 	r.out.ResultSet.Rows = r.out.ResultSet.Rows[1:]
