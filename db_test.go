@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	uuid "github.com/satori/go.uuid"
@@ -413,11 +414,12 @@ type athenaHarness struct {
 }
 
 func setup(t *testing.T, useWorkGroup bool) *athenaHarness {
+	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(AwsRegion))
+	require.NoError(t, err)
+
 	harness := athenaHarness{
-		t: t,
-		config: aws.Config{
-			Region: AwsRegion,
-		},
+		t:      t,
+		config: cfg,
 	}
 
 	connStr := fmt.Sprintf("db=%s&output_location=s3://%s&region=%s", AthenaDatabase, S3Bucket, AwsRegion)
@@ -425,7 +427,6 @@ func setup(t *testing.T, useWorkGroup bool) *athenaHarness {
 		connStr = fmt.Sprintf("db=%s&region=%s&workgroup=%s", AthenaDatabase, AwsRegion, WorkGroup)
 	}
 
-	var err error
 	harness.db, err = sql.Open("athena", connStr)
 	require.NoError(t, err)
 
