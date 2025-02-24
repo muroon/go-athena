@@ -2,16 +2,19 @@ package athena
 
 import (
 	"database/sql/driver"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
 )
 
 type rowsConfig struct {
-	Athena         athenaiface.AthenaAPI
+	Athena interface {
+		GetQueryResultsAPI
+		StartQueryExecutionAPI
+		GetWorkGroupAPI
+		StopQueryExecutionAPI
+		GetQueryExecutionAPI
+	}
 	QueryID        string
 	SkipHeader     bool
 	ResultMode     ResultMode
-	Session        *session.Session
 	OutputLocation string
 	Timeout        uint
 	AfterDownload  func() error

@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/prestodb/presto-go-client/presto"
+	"time"
 )
 
 type stmtAthena struct {
@@ -20,9 +19,7 @@ type stmtAthena struct {
 }
 
 func (s *stmtAthena) Close() error {
-	query := fmt.Sprintf("DEALLOCATE PREPARE %s", s.prepareKey)
-	_, err := s.conn.startQuery(query)
-	return err
+	return nil
 }
 
 func (s *stmtAthena) NumInput() int {
@@ -30,137 +27,83 @@ func (s *stmtAthena) NumInput() int {
 }
 
 func (s *stmtAthena) Exec(args []driver.Value) (driver.Result, error) {
-	values := make([]interface{}, 0, len(args))
-	for _, val := range args {
-		values = append(values, val)
-	}
-
-	ctx := context.Background()
-
-	query, err := s.makeQuery(ctx, values)
-	if err != nil {
-		return nil, err
-	}
-	_, err = s.runQuery(ctx, query)
-	return nil, err
-}
-
-func (s *stmtAthena) Query(args []driver.Value) (driver.Rows, error) {
-	values := make([]interface{}, 0, len(args))
-	for _, val := range args {
-		values = append(values, val)
-	}
-
-	ctx := context.Background()
-
-	query, err := s.makeQuery(ctx, values)
-	if err != nil {
-		return nil, err
-	}
-	return s.runQuery(ctx, query)
+	return s.ExecContext(context.Background(), convertValues(args))
 }
 
 func (s *stmtAthena) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
-	values := make([]interface{}, 0, len(args))
-	for _, val := range args {
-		values = append(values, val.Value)
-	}
+	query := fmt.Sprintf("EXECUTE %s USING %s", s.prepareKey, formatArgs(args))
+	return s.conn.ExecContext(ctx, query, nil)
+}
 
-	query, err := s.makeQuery(ctx, values)
-	if err != nil {
-		return nil, err
-	}
-	_, err = s.runQuery(ctx, query)
-	return nil, err
+func (s *stmtAthena) Query(args []driver.Value) (driver.Rows, error) {
+	return s.QueryContext(context.Background(), convertValues(args))
 }
 
 func (s *stmtAthena) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
-	values := make([]interface{}, 0, len(args))
-	for _, val := range args {
-		values = append(values, val.Value)
-	}
-
-	query, err := s.makeQuery(ctx, values)
-	if err != nil {
-		return nil, err
-	}
-	return s.runQuery(ctx, query)
+	query := fmt.Sprintf("EXECUTE %s USING %s", s.prepareKey, formatArgs(args))
+	return s.conn.QueryContext(ctx, query, nil)
 }
 
-func (s *stmtAthena) makeQuery(ctx context.Context, args []interface{}) (string, error) {
-	params := make([]string, 0, len(args))
-	for _, arg := range args {
-		var param string
-		param, err := serial(ctx, arg)
-		if err != nil {
-			return "", err
+// Helper functions
+func convertValues(args []driver.Value) []driver.NamedValue {
+	namedValues := make([]driver.NamedValue, len(args))
+	for i, v := range args {
+		namedValues[i] = driver.NamedValue{
+			Ordinal: i + 1,
+			Value:   v,
 		}
-
-		params = append(params, param)
 	}
-
-	var query string
-	if len(params) > 0 {
-		query = fmt.Sprintf("EXECUTE %s USING %s", s.prepareKey, strings.Join(params, ","))
-	} else {
-		query = fmt.Sprintf("EXECUTE %s", s.prepareKey)
-	}
-	return query, nil
+	return namedValues
 }
 
-func (s *stmtAthena) runQuery(ctx context.Context, query string) (driver.Rows, error) {
-	// timeout
-	timeout := s.conn.timeout
-	if to, ok := getTimeout(ctx); ok {
-		timeout = to
+func formatArgs(args []driver.NamedValue) string {
+	if len(args) == 0 {
+		return ""
 	}
 
-	// catalog
-	catalog := s.conn.catalog
-	if cat, ok := getCatalog(ctx); ok {
-		catalog = cat
-	}
-
-	// output location (with empty value)
-	if checkOutputLocation(s.resultMode, s.conn.OutputLocation) {
-		var err error
-		s.conn.OutputLocation, err = getOutputLocation(s.conn.athena, s.conn.workgroup)
-		if err != nil {
-			return nil, err
+	values := make([]string, len(args))
+	for i, arg := range args {
+		switch v := arg.Value.(type) {
+		case string:
+			values[i] = fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''"))
+		case nil:
+			values[i] = "NULL"
+		default:
+			values[i] = fmt.Sprint(v)
 		}
 	}
+	return strings.Join(values, ", ")
+}
 
-	queryID, err := s.conn.startQuery(query)
-	if err != nil {
-		return nil, err
+func convertNamedValues(named []driver.NamedValue) []interface{} {
+	args := make([]interface{}, len(named))
+	for i, n := range named {
+		args[i] = n.Value
 	}
+	return args
+}
 
-	if err := s.conn.waitOnQuery(ctx, queryID); err != nil {
-		return nil, err
-	}
-
-	return newRows(rowsConfig{
-		Athena:         s.conn.athena,
-		QueryID:        queryID,
-		SkipHeader:     !isDDLQuery(query),
-		ResultMode:     s.resultMode,
-		Session:        s.conn.session,
-		OutputLocation: s.conn.OutputLocation,
-		Timeout:        timeout,
-		AfterDownload:  s.afterDownload,
-		CTASTable:      s.ctasTable,
-		DB:             s.conn.db,
-		Catalog:        catalog,
-	})
+func join(args []string) string {
+	return strings.Join(args, ", ")
 }
 
 func serial(ctx context.Context, v interface{}) (string, error) {
-	switch x := v.(type) {
-	case float32:
-		return strconv.FormatFloat(float64(x), 'g', -1, 32), nil
-	case float64:
-		return strconv.FormatFloat(x, 'g', -1, 64), nil
+	if v == nil {
+		return "NULL", nil
 	}
 
-	return presto.Serial(v)
+	switch v := v.(type) {
+	case string:
+		return fmt.Sprintf("'%s'", strings.Replace(v, "'", "''", -1)), nil
+	case bool:
+		return fmt.Sprintf("%t", v), nil
+	case int64:
+		return strconv.FormatInt(v, 10), nil
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64), nil
+	case time.Time:
+		return fmt.Sprintf("TIMESTAMP '%s'", v.Format("2006-01-02 15:04:05.999")), nil
+	}
+
+	return "", fmt.Errorf("unsupported type: %T", v)
 }

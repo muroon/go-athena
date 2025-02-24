@@ -5,29 +5,52 @@ import (
 	"context"
 	"database/sql/driver"
 	"fmt"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/athena"
-	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"io"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/athena"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
+type columnType struct {
+	typeName string
+}
+
+func newColumnType(typeName string) *columnType {
+	return &columnType{typeName: typeName}
+}
+
+func (ct *columnType) DatabaseTypeName() string {
+	return ct.typeName
+}
+
+func (ct *columnType) ConvertValue(val string) (interface{}, error) {
+	return convertValue(ct.typeName, &val)
+}
+
 type rowsDL struct {
-	athena         athenaiface.AthenaAPI
-	queryID        string
-	resultMode     ResultMode
-	out            *athena.GetQueryResultsOutput
-	downloadedRows *downloadedRows
+	athena     *athena.Client
+	queryID    string
+	resultMode ResultMode
+
+	columnNames []string
+	columnTypes []*columnType
+	records     [][]downloadField
+	recordPtr   int
 }
 
 func newRowsDL(cfg rowsConfig) (*rowsDL, error) {
+	client, ok := cfg.Athena.(*athena.Client)
+	if !ok {
+		return nil, fmt.Errorf("invalid athena client type")
+	}
 	r := &rowsDL{
-		athena:     cfg.Athena,
+		athena:     client,
 		queryID:    cfg.QueryID,
 		resultMode: cfg.ResultMode,
 	}
@@ -40,110 +63,138 @@ func (r *rowsDL) init(cfg rowsConfig) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.Timeout)*time.Second)
 	defer cancel()
 
-	err := make(chan error, 2)
-
+	errChan := make(chan error, 2)
 	// download and set in memory
-	go r.downloadCsvAsync(ctx, err, cfg.Session, cfg.OutputLocation)
-
+	go r.downloadCsvAsync(ctx, errChan, cfg.OutputLocation)
 	// get table metadata
-	go r.getQueryResultsAsyncForCsv(ctx, err)
+	go r.getQueryResultsAsyncForCsv(ctx, errChan)
 
 	for i := 0; i < 2; i++ {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case e := <-err:
-			if e != nil {
-				return e
+		case err := <-errChan:
+			if err != nil {
+				return err
 			}
 		}
 	}
 	return nil
 }
 
-func (r *rowsDL) downloadCsvAsync(
-	ctx context.Context,
-	errCh chan error,
-	sess *session.Session,
-	location string,
-) {
-	errCh <- r.downloadCsv(sess, location)
-}
-
-func (r *rowsDL) downloadCsv(sess *session.Session, location string) error {
-	// remove the first 5 characters "s3://" from location
-	bucketName := location[5:]
-	objectKey := fmt.Sprintf("%s.csv", r.queryID)
-
-	buff := &aws.WriteAtBuffer{}
-	downloader := s3manager.NewDownloader(sess)
-	_, err := downloader.Download(buff, &s3.GetObjectInput{
-		Bucket: aws.String(bucketName),
-		Key:    aws.String(objectKey),
-	})
-	if err != nil {
-		return err
-	}
-
-	bfData := buff.Bytes()
-
-	fields, err := getRecordsForDL(strings.NewReader(string(bfData)))
-	if err != nil {
-		return err
-	}
-	r.downloadedRows = &downloadedRows{
-		field: fields[1:],
-	}
-
-	return nil
-}
-
-func (r *rowsDL) getQueryResultsAsyncForCsv(ctx context.Context, errCh chan error) {
-	var err error
-	r.out, err = r.athena.GetQueryResults(&athena.GetQueryResultsInput{
-		QueryExecutionId: aws.String(r.queryID),
-		MaxResults:       aws.Int64(1),
-	})
-	errCh <- err
-}
-
-func (r *rowsDL) nextDownload(dest []driver.Value) error {
-	if r.downloadedRows.cursor >= len(r.downloadedRows.field) {
-		return io.EOF
-	}
-	row := r.downloadedRows.field[r.downloadedRows.cursor]
-	columns := r.out.ResultSet.ResultSetMetadata.ColumnInfo
-	if err := convertRowFromCsv(columns, row, dest); err != nil {
-		return err
-	}
-
-	r.downloadedRows.cursor++
-	return nil
-}
-
 func (r *rowsDL) Columns() []string {
-	var columns []string
-	for _, colInfo := range r.out.ResultSet.ResultSetMetadata.ColumnInfo {
-		columns = append(columns, *colInfo.Name)
-	}
-
-	return columns
-}
-
-func (r *rowsDL) ColumnTypeDatabaseTypeName(index int) string {
-	colInfo := r.out.ResultSet.ResultSetMetadata.ColumnInfo[index]
-	if colInfo.Type != nil {
-		return *colInfo.Type
-	}
-	return ""
-}
-
-func (r *rowsDL) Next(dest []driver.Value) error {
-	return r.nextDownload(dest)
+	return r.columnNames
 }
 
 func (r *rowsDL) Close() error {
 	return nil
+}
+
+func (r *rowsDL) Next(dest []driver.Value) error {
+	if r.recordPtr >= len(r.records) {
+		return io.EOF
+	}
+
+	record := r.records[r.recordPtr]
+	r.recordPtr++
+
+	for i := range dest {
+		if i >= len(record) {
+			dest[i] = nil
+			continue
+		}
+
+		if record[i].isNil {
+			dest[i] = nil
+			continue
+		}
+
+		v, err := r.columnTypes[i].ConvertValue(record[i].val)
+		if err != nil {
+			return err
+		}
+		dest[i] = v
+	}
+
+	return nil
+}
+
+func (r *rowsDL) ColumnTypeDatabaseTypeName(index int) string {
+	return r.columnTypes[index].DatabaseTypeName()
+}
+
+func (r *rowsDL) downloadCsvAsync(ctx context.Context, errChan chan<- error, outputLocation string) {
+	defer func() {
+		errChan <- nil
+	}()
+
+	u, err := url.Parse(outputLocation)
+	if err != nil {
+		errChan <- fmt.Errorf("failed to parse output location: %v", err)
+		return
+	}
+
+	key := strings.TrimPrefix(u.Path, "/")
+	key = fmt.Sprintf("%s/%s.csv", key, r.queryID)
+
+	// Download CSV file
+	input := &s3.GetObjectInput{
+		Bucket: aws.String(u.Host),
+		Key:    aws.String(key),
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		errChan <- fmt.Errorf("failed to load AWS config: %v", err)
+		return
+	}
+
+	s3Client := s3.NewFromConfig(cfg)
+	resp, err := s3Client.GetObject(ctx, input)
+	if err != nil {
+		errChan <- fmt.Errorf("failed to download CSV: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Parse CSV
+	records, err := getRecordsForDL(resp.Body)
+	if err != nil {
+		errChan <- fmt.Errorf("failed to parse CSV: %v", err)
+		return
+	}
+
+	r.records = records
+}
+
+func (r *rowsDL) getQueryResultsAsyncForCsv(ctx context.Context, errChan chan<- error) {
+	defer func() {
+		errChan <- nil
+	}()
+
+	input := &athena.GetQueryResultsInput{
+		QueryExecutionId: aws.String(r.queryID),
+	}
+
+	resp, err := r.athena.GetQueryResults(ctx, input)
+	if err != nil {
+		errChan <- fmt.Errorf("failed to get query results: %v", err)
+		return
+	}
+
+	if resp.ResultSet == nil || resp.ResultSet.ResultSetMetadata == nil {
+		errChan <- fmt.Errorf("invalid response format")
+		return
+	}
+
+	columnInfo := resp.ResultSet.ResultSetMetadata.ColumnInfo
+	r.columnNames = make([]string, len(columnInfo))
+	r.columnTypes = make([]*columnType, len(columnInfo))
+
+	for i, info := range columnInfo {
+		r.columnNames[i] = *info.Name
+		r.columnTypes[i] = newColumnType(*info.Type)
+	}
 }
 
 func getRecordsForDL(reader io.Reader) ([][]downloadField, error) {
@@ -186,7 +237,6 @@ func getRecordsForDL(reader io.Reader) ([][]downloadField, error) {
 				}
 				record = append(record, row)
 				field = ""
-				delimiter = false
 			} else {
 				field += string(r)
 			}

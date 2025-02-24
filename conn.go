@@ -3,32 +3,50 @@ package athena
 import (
 	"context"
 	"database/sql/driver"
-	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/athena"
+	"github.com/aws/aws-sdk-go-v2/service/athena/types"
 	uuid "github.com/satori/go.uuid"
-
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/athena"
-	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
 )
 
+// GetQueryResultsAPI defines the interface for Athena GetQueryResults operation
+type GetQueryResultsAPI interface {
+	GetQueryResults(ctx context.Context, params *athena.GetQueryResultsInput, optFns ...func(*athena.Options)) (*athena.GetQueryResultsOutput, error)
+}
+
+// StartQueryExecutionAPI defines the interface for Athena StartQueryExecution operation
+type StartQueryExecutionAPI interface {
+	StartQueryExecution(ctx context.Context, params *athena.StartQueryExecutionInput, optFns ...func(*athena.Options)) (*athena.StartQueryExecutionOutput, error)
+}
+
+// GetWorkGroupAPI defines the interface for Athena GetWorkGroup operation
+type GetWorkGroupAPI interface {
+	GetWorkGroup(ctx context.Context, params *athena.GetWorkGroupInput, optFns ...func(*athena.Options)) (*athena.GetWorkGroupOutput, error)
+}
+
+// StopQueryExecutionAPI defines the interface for Athena StopQueryExecution operation
+type StopQueryExecutionAPI interface {
+	StopQueryExecution(ctx context.Context, params *athena.StopQueryExecutionInput, optFns ...func(*athena.Options)) (*athena.StopQueryExecutionOutput, error)
+}
+
+// GetQueryExecutionAPI defines the interface for Athena GetQueryExecution operation
+type GetQueryExecutionAPI interface {
+	GetQueryExecution(ctx context.Context, params *athena.GetQueryExecutionInput, optFns ...func(*athena.Options)) (*athena.GetQueryExecutionOutput, error)
+}
+
 type conn struct {
-	athena         athenaiface.AthenaAPI
+	athena         *athena.Client
 	db             string
 	OutputLocation string
 	workgroup      string
-
-	pollFrequency time.Duration
-
-	resultMode ResultMode
-	session    *session.Session
-	timeout    uint
-	catalog    string
+	pollFrequency  time.Duration
+	resultMode     ResultMode
+	timeout        uint
+	catalog        string
 }
 
 func (c *conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
@@ -50,47 +68,6 @@ func (c *conn) ExecContext(ctx context.Context, query string, args []driver.Name
 }
 
 func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) {
-	// result mode
-	isSelect := isSelectQuery(query)
-	resultMode := c.resultMode
-	if rmode, ok := getResultMode(ctx); ok {
-		resultMode = rmode
-	}
-	if !isSelect {
-		resultMode = ResultModeAPI
-	}
-
-	// timeout
-	timeout := c.timeout
-	if to, ok := getTimeout(ctx); ok {
-		timeout = to
-	}
-
-	// catalog
-	catalog := c.catalog
-	if cat, ok := getCatalog(ctx); ok {
-		catalog = cat
-	}
-
-	// output location (with empty value)
-	if checkOutputLocation(resultMode, c.OutputLocation) {
-		var err error
-		c.OutputLocation, err = getOutputLocation(c.athena, c.workgroup)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// mode ctas
-	var ctasTable string
-	var afterDownload func() error
-	if isCreatingCTASTable(isSelect, resultMode) {
-		// Create AS Select
-		ctasTable = fmt.Sprintf("tmp_ctas_%v", strings.Replace(uuid.NewV4().String(), "-", "", -1))
-		query = fmt.Sprintf("CREATE TABLE %s WITH (format='TEXTFILE') AS %s", ctasTable, query)
-		afterDownload = c.dropCTASTable(ctx, ctasTable)
-	}
-
 	queryID, err := c.startQuery(query)
 	if err != nil {
 		return nil, err
@@ -100,46 +77,63 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 		return nil, err
 	}
 
-	return newRows(rowsConfig{
+	resultMode := c.resultMode
+	if rmode, ok := getResultMode(ctx); ok {
+		resultMode = rmode
+	}
+
+	var timeout uint = timeOutLimitDefault
+	if tm, ok := getTimeout(ctx); ok {
+		timeout = tm
+	}
+
+	var catalog string = c.catalog
+	if ct, ok := getCatalog(ctx); ok {
+		catalog = ct
+	}
+
+	cfg := rowsConfig{
 		Athena:         c.athena,
 		QueryID:        queryID,
-		SkipHeader:     !isDDLQuery(query),
-		ResultMode:     resultMode,
-		Session:        c.session,
-		OutputLocation: c.OutputLocation,
-		Timeout:        timeout,
-		AfterDownload:  afterDownload,
-		CTASTable:      ctasTable,
 		DB:             c.db,
+		OutputLocation: c.OutputLocation,
+		SkipHeader:     !isDDLQuery(query) && !isCTASQuery(query),
+		ResultMode:     resultMode,
+		Timeout:        timeout,
 		Catalog:        catalog,
-	})
+	}
+
+	return newRows(cfg)
 }
 
 func (c *conn) dropCTASTable(ctx context.Context, table string) func() error {
 	return func() error {
-		query := fmt.Sprintf("DROP TABLE %s", table)
-
-		queryID, err := c.startQuery(query)
+		queryID, err := c.startQuery(fmt.Sprintf("DROP TABLE %s", table))
 		if err != nil {
 			return err
 		}
-
 		return c.waitOnQuery(ctx, queryID)
 	}
 }
 
 // startQuery starts an Athena query and returns its ID.
 func (c *conn) startQuery(query string) (string, error) {
-	resp, err := c.athena.StartQueryExecution(&athena.StartQueryExecutionInput{
-		QueryString: aws.String(query),
-		QueryExecutionContext: &athena.QueryExecutionContext{
-			Database: aws.String(c.db),
+	input := &athena.StartQueryExecutionInput{
+		QueryString: &query,
+		QueryExecutionContext: &types.QueryExecutionContext{
+			Database: &c.db,
+			Catalog:  &c.catalog,
 		},
-		ResultConfiguration: &athena.ResultConfiguration{
-			OutputLocation: aws.String(c.OutputLocation),
-		},
-		WorkGroup: aws.String(c.workgroup),
-	})
+		WorkGroup: &c.workgroup,
+	}
+
+	if c.OutputLocation != "" {
+		input.ResultConfiguration = &types.ResultConfiguration{
+			OutputLocation: &c.OutputLocation,
+		}
+	}
+
+	resp, err := c.athena.StartQueryExecution(context.Background(), input)
 	if err != nil {
 		return "", err
 	}
@@ -149,37 +143,53 @@ func (c *conn) startQuery(query string) (string, error) {
 
 // waitOnQuery blocks until a query finishes, returning an error if it failed.
 func (c *conn) waitOnQuery(ctx context.Context, queryID string) error {
+	input := &athena.GetQueryExecutionInput{
+		QueryExecutionId: &queryID,
+	}
+
+	var timeout uint = timeOutLimitDefault
+	if tm, ok := getTimeout(ctx); ok {
+		timeout = tm
+	}
+
+	start := time.Now()
 	for {
-		statusResp, err := c.athena.GetQueryExecutionWithContext(ctx, &athena.GetQueryExecutionInput{
-			QueryExecutionId: aws.String(queryID),
-		})
+		resp, err := c.athena.GetQueryExecution(ctx, input)
 		if err != nil {
 			return err
 		}
 
-		switch *statusResp.QueryExecution.Status.State {
-		case athena.QueryExecutionStateCancelled:
-			return context.Canceled
-		case athena.QueryExecutionStateFailed:
-			reason := *statusResp.QueryExecution.Status.StateChangeReason
-			return errors.New(reason)
-		case athena.QueryExecutionStateSucceeded:
+		if resp.QueryExecution == nil {
+			return fmt.Errorf("nil QueryExecution")
+		}
+
+		state := resp.QueryExecution.Status.State
+		if state == types.QueryExecutionStateSucceeded {
 			return nil
-		case athena.QueryExecutionStateQueued:
-		case athena.QueryExecutionStateRunning:
 		}
 
-		select {
-		case <-ctx.Done():
-			c.athena.StopQueryExecution(&athena.StopQueryExecutionInput{
-				QueryExecutionId: aws.String(queryID),
-			})
-
-			return ctx.Err()
-		case <-time.After(c.pollFrequency):
-			continue
+		if state == types.QueryExecutionStateFailed ||
+			state == types.QueryExecutionStateCancelled {
+			return fmt.Errorf("query execution failed: %s", *resp.QueryExecution.Status.StateChangeReason)
 		}
+
+		if uint(time.Since(start).Seconds()) > timeout {
+			// timeout
+			c.stopQuery(queryID)
+			return fmt.Errorf("query timeout after %d seconds", timeout)
+		}
+
+		time.Sleep(c.pollFrequency)
 	}
+}
+
+func (c *conn) stopQuery(queryID string) error {
+	input := &athena.StopQueryExecutionInput{
+		QueryExecutionId: &queryID,
+	}
+
+	_, err := c.athena.StopQueryExecution(context.Background(), input)
+	return err
 }
 
 func (c *conn) Prepare(query string) (driver.Stmt, error) {

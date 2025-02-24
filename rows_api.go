@@ -1,23 +1,24 @@
 package athena
 
 import (
+	"context"
 	"database/sql/driver"
 	"io"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/athena"
-	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
+	"github.com/aws/aws-sdk-go-v2/service/athena"
+	"github.com/aws/aws-sdk-go-v2/service/athena/types"
 )
 
 type rowsAPI struct {
-	athena     athenaiface.AthenaAPI
-	queryID    string
-	resultMode ResultMode
-
-	// use only api mode
-	done          bool
+	athena        GetQueryResultsAPI
+	queryID       string
 	skipHeaderRow bool
-	out           *athena.GetQueryResultsOutput
+	resultMode    ResultMode
+
+	currentData []types.Row
+	done        bool
+	columnNames []string
+	columnTypes []*columnType
 }
 
 func newRowsAPI(cfg rowsConfig) (*rowsAPI, error) {
@@ -41,87 +42,90 @@ func (r *rowsAPI) init(cfg rowsConfig) error {
 	return nil
 }
 
-func (r *rowsAPI) fetchNextPage(token *string) (bool, error) {
-	var err error
-	r.out, err = r.athena.GetQueryResults(&athena.GetQueryResultsInput{
-		QueryExecutionId: aws.String(r.queryID),
-		NextToken:        token,
-	})
+func (r *rowsAPI) Columns() []string {
+	return r.columnNames
+}
+
+func (r *rowsAPI) Close() error {
+	return nil
+}
+
+func (r *rowsAPI) Next(dest []driver.Value) error {
+	if len(r.currentData) == 0 {
+		if r.done {
+			return io.EOF
+		}
+
+		shouldContinue, err := r.fetchNextPage(nil)
+		if err != nil {
+			return err
+		}
+		if !shouldContinue {
+			return io.EOF
+		}
+	}
+
+	currentRow := r.currentData[0]
+	r.currentData = r.currentData[1:]
+
+	for i, val := range currentRow.Data {
+		if val.VarCharValue == nil {
+			dest[i] = nil
+			continue
+		}
+
+		v, err := r.columnTypes[i].ConvertValue(*val.VarCharValue)
+		if err != nil {
+			return err
+		}
+		dest[i] = v
+	}
+
+	return nil
+}
+
+func (r *rowsAPI) fetchNextPage(nextToken *string) (bool, error) {
+	input := &athena.GetQueryResultsInput{
+		QueryExecutionId: &r.queryID,
+	}
+	if nextToken != nil {
+		input.NextToken = nextToken
+	}
+
+	resp, err := r.athena.GetQueryResults(context.Background(), input)
 	if err != nil {
 		return false, err
 	}
 
-	var rowOffset = 0
-	// First row of the first page contains header if the query is not DDL.
-	// These are also available in *athena.Row.ResultSetMetadata.
-	if r.skipHeaderRow {
-		rowOffset = 1
-		r.skipHeaderRow = false
-	}
-
-	if len(r.out.ResultSet.Rows) < rowOffset+1 {
+	if resp.ResultSet == nil {
 		return false, nil
 	}
 
-	r.out.ResultSet.Rows = r.out.ResultSet.Rows[rowOffset:]
-	return true, nil
-}
-
-func (r *rowsAPI) nextAPI(dest []driver.Value) error {
-	if r.done {
-		return io.EOF
-	}
-
-	// If nothing left to iterate...
-	if len(r.out.ResultSet.Rows) == 0 {
-		// And if nothing more to paginate...
-		if r.out.NextToken == nil || *r.out.NextToken == "" {
-			return io.EOF
-		}
-
-		cont, err := r.fetchNextPage(r.out.NextToken)
-		if err != nil {
-			return err
-		}
-
-		if !cont {
-			return io.EOF
+	// Initialize column names and types if this is our first fetch
+	if r.columnNames == nil {
+		r.columnNames = make([]string, len(resp.ResultSet.ResultSetMetadata.ColumnInfo))
+		r.columnTypes = make([]*columnType, len(resp.ResultSet.ResultSetMetadata.ColumnInfo))
+		for i, info := range resp.ResultSet.ResultSetMetadata.ColumnInfo {
+			r.columnNames[i] = *info.Name
+			r.columnTypes[i] = newColumnType(*info.Type)
 		}
 	}
 
-	// Shift to next row
-	cur := r.out.ResultSet.Rows[0]
-	columns := r.out.ResultSet.ResultSetMetadata.ColumnInfo
-	if err := convertRow(columns, cur.Data, dest); err != nil {
-		return err
+	rows := resp.ResultSet.Rows
+	if len(rows) == 0 {
+		return false, nil
 	}
 
-	r.out.ResultSet.Rows = r.out.ResultSet.Rows[1:]
-	return nil
-}
-
-func (r *rowsAPI) Columns() []string {
-	var columns []string
-	for _, colInfo := range r.out.ResultSet.ResultSetMetadata.ColumnInfo {
-		columns = append(columns, *colInfo.Name)
+	// Skip the header row if needed and it exists
+	if r.skipHeaderRow && len(rows) > 0 {
+		rows = rows[1:]
 	}
+	r.skipHeaderRow = false
 
-	return columns
+	r.currentData = rows
+	return resp.NextToken != nil, nil
 }
 
 func (r *rowsAPI) ColumnTypeDatabaseTypeName(index int) string {
-	colInfo := r.out.ResultSet.ResultSetMetadata.ColumnInfo[index]
-	if colInfo.Type != nil {
-		return *colInfo.Type
-	}
-	return ""
-}
-
-func (r *rowsAPI) Next(dest []driver.Value) error {
-	return r.nextAPI(dest)
-}
-
-func (r *rowsAPI) Close() error {
-	r.done = true
-	return nil
+	return r.columnTypes[index].DatabaseTypeName()
 }

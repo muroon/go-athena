@@ -1,45 +1,37 @@
 package athena
 
 import (
-	"bufio"
-	"compress/gzip"
 	"context"
 	"database/sql/driver"
 	"fmt"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/athena"
-	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"io"
-	"strings"
 	"time"
-	"unicode/utf8"
-)
 
-const (
-	CATALOG_AWS_DATA_CATALOG string = "AwsDataCatalog"
+	"github.com/aws/aws-sdk-go-v2/service/athena"
+	"github.com/aws/aws-sdk-go-v2/service/athena/types"
 )
 
 type rowsGzipDL struct {
-	athena     athenaiface.AthenaAPI
+	athena     *athena.Client
 	queryID    string
 	resultMode ResultMode
+	ctasTable  string
+	db         string
+	catalog    string
 
-	// use download
-	downloadedRows *downloadedRows
-
-	// ctas table
-	ctasTable        string
-	db               string
-	catalog          string
-	ctasTableColumns []*athena.Column
+	columnNames []string
+	columnTypes []*ColumnType
+	currentData []types.Row
+	done        bool
 }
 
 func newRowsGzipDL(cfg rowsConfig) (*rowsGzipDL, error) {
+	client, ok := cfg.Athena.(*athena.Client)
+	if !ok {
+		return nil, fmt.Errorf("invalid athena client type")
+	}
 	r := &rowsGzipDL{
-		athena:     cfg.Athena,
+		athena:     client,
 		queryID:    cfg.QueryID,
 		resultMode: cfg.ResultMode,
 		ctasTable:  cfg.CTASTable,
@@ -55,213 +47,118 @@ func (r *rowsGzipDL) init(cfg rowsConfig) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.Timeout)*time.Second)
 	defer cancel()
 
-	err := make(chan error, 2)
-
-	// download and set in memory
-	go r.downloadCompressedDataAsync(ctx, err, cfg.Session, cfg.OutputLocation)
-
 	// get table metadata
-	go r.getTableAsync(ctx, err)
-
-	for i := 0; i < 2; i++ {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case e := <-err:
-			if e != nil {
-				return e
-			}
-		}
-	}
-
-	// drop ctas table
-	if cfg.AfterDownload != nil {
-		if e := cfg.AfterDownload(); e != nil {
-			return e
-		}
-	}
-
-	return nil
-}
-
-func (r *rowsGzipDL) downloadCompressedDataAsync(
-	ctx context.Context,
-	errCh chan error,
-	sess *session.Session,
-	location string,
-) {
-	errCh <- r.downloadCompressedData(sess, location)
-}
-
-func (r *rowsGzipDL) downloadCompressedData(sess *session.Session, location string) error {
-	if location[len(location)-1:] == "/" {
-		location = location[:len(location)-1]
-	}
-
-	// remove the first 5 characters "s3://" from location
-	bucketName := location[5:]
-
-	// get gz file path
-	buff := &aws.WriteAtBuffer{}
-
-	downloader := s3manager.NewDownloader(sess)
-	_, err := downloader.Download(buff, &s3.GetObjectInput{
-		Bucket: aws.String(bucketName),
-		Key:    aws.String(fmt.Sprintf("tables/%s-manifest.csv", r.queryID)),
-	})
+	columns, err := r.getColumnInfo(ctx)
 	if err != nil {
 		return err
 	}
 
-	start := len(location) + 1 // the path is "location/objectKey"
-	objectKeys, err := getObjectKeysForGzip(strings.NewReader(string(buff.Bytes())), start)
-	if err != nil {
-		return err
-	}
-
-	for _, objectKey := range objectKeys {
-		buff := &aws.WriteAtBuffer{}
-
-		_, err := downloader.Download(buff, &s3.GetObjectInput{
-			Bucket: aws.String(bucketName),
-			Key:    aws.String(objectKey),
-		})
-		if err != nil {
-			return err
-		}
-
-		bfData := buff.Bytes()
-
-		// decompress gzip
-		gzipReader, err := gzip.NewReader(strings.NewReader(string(bfData)))
-		if err != nil {
-			return err
-		}
-
-		datas, err := getRecordsFromGzip(gzipReader)
-		if err != nil {
-			return err
-		}
-		if r.downloadedRows == nil {
-			r.downloadedRows = &downloadedRows{
-				data: make([][]string, 0, len(datas)*len(objectKeys)),
-			}
-		}
-		r.downloadedRows.data = append(r.downloadedRows.data, datas...)
+	r.columnNames = make([]string, len(columns))
+	r.columnTypes = make([]*ColumnType, len(columns))
+	for i, col := range columns {
+		r.columnNames[i] = *col.Name
+		r.columnTypes[i] = NewColumnType(*col.Type)
 	}
 
 	return nil
-}
-
-func (r *rowsGzipDL) getTableAsync(ctx context.Context, errCh chan error) {
-	data, err := r.athena.GetTableMetadata(&athena.GetTableMetadataInput{
-		CatalogName:  aws.String(r.catalog),
-		DatabaseName: aws.String(r.db),
-		TableName:    aws.String(r.ctasTable),
-	})
-	if err != nil {
-		errCh <- err
-		return
-	}
-
-	r.ctasTableColumns = data.TableMetadata.Columns
-	errCh <- nil
-}
-
-func (r *rowsGzipDL) nextCTAS(dest []driver.Value) error {
-	if r.downloadedRows.cursor >= len(r.downloadedRows.data) {
-		return io.EOF
-	}
-
-	row := r.downloadedRows.data[r.downloadedRows.cursor]
-	if err := convertRowFromTableInfo(r.ctasTableColumns, row, dest); err != nil {
-		return err
-	}
-
-	r.downloadedRows.cursor++
-	return nil
-}
-
-func (r *rowsGzipDL) columnTypeDatabaseTypeNameForCTAS(index int) string {
-	column := r.ctasTableColumns[index]
-	if column == nil || column.Type == nil {
-		return ""
-	}
-	return *column.Type
 }
 
 func (r *rowsGzipDL) Columns() []string {
-	var columns []string
-
-	for _, col := range r.ctasTableColumns {
-		columns = append(columns, *col.Name)
-	}
-
-	return columns
-}
-
-func (r *rowsGzipDL) ColumnTypeDatabaseTypeName(index int) string {
-	return r.columnTypeDatabaseTypeNameForCTAS(index)
-}
-
-func (r *rowsGzipDL) Next(dest []driver.Value) error {
-	return r.nextCTAS(dest)
+	return r.columnNames
 }
 
 func (r *rowsGzipDL) Close() error {
 	return nil
 }
 
-func getObjectKeysForGzip(reader io.Reader, start int) ([]string, error) {
-
-	keys := make([]string, 0)
-	scanner := bufio.NewScanner(reader)
-
-	// read line by line
-	for scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return nil, err
+func (r *rowsGzipDL) Next(dest []driver.Value) error {
+	if len(r.currentData) == 0 {
+		if r.done {
+			return io.EOF
 		}
-		k := scanner.Text()
-		if start > 0 && len(k) > start {
-			k = k[start:]
+
+		shouldContinue, err := r.fetchNextPage(nil)
+		if err != nil {
+			return err
 		}
-		keys = append(keys, k)
+		if !shouldContinue {
+			return io.EOF
+		}
 	}
 
-	return keys, nil
+	currentRow := r.currentData[0]
+	r.currentData = r.currentData[1:]
+
+	for i, val := range currentRow.Data {
+		if val.VarCharValue == nil {
+			dest[i] = nil
+			continue
+		}
+
+		v, err := r.columnTypes[i].ConvertValue(*val.VarCharValue)
+		if err != nil {
+			return err
+		}
+		dest[i] = v
+	}
+
+	return nil
 }
 
-func getRecordsFromGzip(reader io.Reader) ([][]string, error) {
-	records := make([][]string, 0)
+func (r *rowsGzipDL) ColumnTypeDatabaseTypeName(index int) string {
+	return r.columnTypes[index].DatabaseTypeName()
+}
 
-	scanner := bufio.NewScanner(reader)
-
-	// read line by line
-	for scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return nil, err
-		}
-		b := scanner.Bytes()
-		field := ""
-		record := make([]string, 0)
-		for {
-			r, width := utf8.DecodeRune(b)
-			if r == '\001' {
-				record = append(record, field)
-				field = ""
-			} else {
-				field += string(r)
-			}
-			if width >= len(b) {
-				record = append(record, field)
-				break
-			}
-			b = b[width:]
-		}
-
-		records = append(records, record)
+func (r *rowsGzipDL) fetchNextPage(nextToken *string) (bool, error) {
+	input := &athena.GetQueryResultsInput{
+		QueryExecutionId: &r.queryID,
+	}
+	if nextToken != nil {
+		input.NextToken = nextToken
 	}
 
-	return records, nil
+	resp, err := r.athena.GetQueryResults(context.Background(), input)
+	if err != nil {
+		return false, err
+	}
+
+	if resp.ResultSet == nil || len(resp.ResultSet.Rows) == 0 {
+		return false, nil
+	}
+
+	r.currentData = resp.ResultSet.Rows[1:] // Skip header row
+	return resp.NextToken != nil, nil
+}
+
+func (r *rowsGzipDL) getColumnInfo(ctx context.Context) ([]types.ColumnInfo, error) {
+	query := fmt.Sprintf("SELECT * FROM %s LIMIT 0", r.ctasTable)
+
+	input := &athena.StartQueryExecutionInput{
+		QueryString: &query,
+		QueryExecutionContext: &types.QueryExecutionContext{
+			Database: &r.db,
+			Catalog:  &r.catalog,
+		},
+	}
+
+	resp, err := r.athena.StartQueryExecution(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+
+	queryID := *resp.QueryExecutionId
+	getResultsInput := &athena.GetQueryResultsInput{
+		QueryExecutionId: &queryID,
+	}
+
+	results, err := r.athena.GetQueryResults(ctx, getResultsInput)
+	if err != nil {
+		return nil, err
+	}
+
+	if results.ResultSet == nil || results.ResultSet.ResultSetMetadata == nil {
+		return nil, fmt.Errorf("invalid response format")
+	}
+
+	return results.ResultSet.ResultSetMetadata.ColumnInfo, nil
 }

@@ -1,20 +1,20 @@
 package athena
 
 import (
+	"context"
 	"database/sql"
 	"database/sql/driver"
 	"errors"
 	"fmt"
-	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/athena"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/athena"
 )
 
 var (
@@ -25,6 +25,8 @@ var (
 const (
 	// timeOutLimitDefault athena's timeout limit
 	timeOutLimitDefault uint = 1800
+	// CATALOG_AWS_DATA_CATALOG default catalog name
+	CATALOG_AWS_DATA_CATALOG = "AwsDataCatalog"
 )
 
 // Driver is a sql.Driver. It's intended for db/sql.Open().
@@ -81,13 +83,12 @@ func (d *Driver) Open(connStr string) (driver.Conn, error) {
 			return nil, err
 		}
 	}
-
 	if cfg.PollFrequency == 0 {
 		cfg.PollFrequency = 5 * time.Second
 	}
 
-	// athena client
-	athenaClient := athena.New(cfg.Session)
+	// Create Athena client with AWS config
+	athenaClient := athena.NewFromConfig(cfg.AWSConfig)
 
 	// output location (with empty value)
 	if checkOutputLocation(cfg.ResultMode, cfg.OutputLocation) {
@@ -105,30 +106,20 @@ func (d *Driver) Open(connStr string) (driver.Conn, error) {
 		pollFrequency:  cfg.PollFrequency,
 		workgroup:      cfg.WorkGroup,
 		resultMode:     cfg.ResultMode,
-		session:        cfg.Session,
 		timeout:        cfg.Timeout,
 		catalog:        cfg.Catalog,
 	}, nil
 }
 
-// Open is a more robust version of `db.Open`, as it accepts a raw aws.Session.
-// This is useful if you have a complex AWS session since the driver doesn't
-// currently attempt to serialize all options into a string.
+// Open is a more robust version of `db.Open`, as it accepts a raw aws.Config.
 func Open(cfg Config) (*sql.DB, error) {
 	if cfg.Database == "" {
 		return nil, errors.New("db is required")
 	}
-
-	if cfg.Session == nil {
-		return nil, errors.New("session is required")
-	}
-
 	if cfg.WorkGroup == "" {
 		cfg.WorkGroup = "primary"
 	}
 
-	// This hack was copied from jackc/pgx. Sorry :(
-	// https://github.com/jackc/pgx/blob/70a284f4f33a9cc28fd1223f6b83fb00deecfe33/stdlib/sql.go#L130-L136
 	openFromSessionMutex.Lock()
 	openFromSessionCount++
 	name := fmt.Sprintf("athena-%d", openFromSessionCount)
@@ -140,16 +131,14 @@ func Open(cfg Config) (*sql.DB, error) {
 
 // Config is the input to Open().
 type Config struct {
-	Session        *session.Session
+	AWSConfig      aws.Config
 	Database       string
 	OutputLocation string
 	WorkGroup      string
-
-	PollFrequency time.Duration
-
-	ResultMode ResultMode
-	Timeout    uint
-	Catalog    string
+	PollFrequency  time.Duration
+	ResultMode     ResultMode
+	Timeout        uint
+	Catalog        string
 }
 
 func configFromConnectionString(connStr string) (*Config, error) {
@@ -159,16 +148,19 @@ func configFromConnectionString(connStr string) (*Config, error) {
 	}
 
 	var cfg Config
+	ctx := context.Background()
+	cfgOpts := []func(*config.LoadOptions) error{}
 
-	var acfg []*aws.Config
 	if region := args.Get("region"); region != "" {
-		acfg = append(acfg, &aws.Config{Region: aws.String(region)})
+		cfgOpts = append(cfgOpts, config.WithRegion(region))
 	}
-	cfg.Session, err = session.NewSession(acfg...)
+
+	awsCfg, err := config.LoadDefaultConfig(ctx, cfgOpts...)
 	if err != nil {
 		return nil, err
 	}
 
+	cfg.AWSConfig = awsCfg
 	cfg.Database = args.Get("db")
 	cfg.OutputLocation = args.Get("output_location")
 	cfg.WorkGroup = args.Get("workgroup")
@@ -195,7 +187,7 @@ func configFromConnectionString(connStr string) (*Config, error) {
 
 	cfg.Timeout = timeOutLimitDefault
 	if tm := args.Get("timeout"); tm != "" {
-		if timeout, err := strconv.ParseUint(tm, 10, 32); err != nil {
+		if timeout, err := strconv.ParseUint(tm, 10, 32); err == nil {
 			cfg.Timeout = uint(timeout)
 		}
 	}
@@ -210,19 +202,28 @@ func configFromConnectionString(connStr string) (*Config, error) {
 
 // checkOutputLocation is to check if outputLocation should be obtained from workgroup.
 func checkOutputLocation(resultMode ResultMode, outputLocation string) bool {
-	return resultMode != ResultModeAPI && outputLocation == ""
+	return resultMode != ResultModeGzipDL && outputLocation == ""
 }
 
 // getOutputLocation is for getting output location value from workgroup when location value is empty.
-func getOutputLocation(athenaClient athenaiface.AthenaAPI, workGroup string) (string, error) {
-	var outputLocation string
-	output, err := athenaClient.GetWorkGroup(
-		&athena.GetWorkGroupInput{
-			WorkGroup: aws.String(workGroup),
-		},
-	)
-	if err == nil {
-		outputLocation = *output.WorkGroup.Configuration.ResultConfiguration.OutputLocation
+func getOutputLocation(athenaClient *athena.Client, workGroup string) (string, error) {
+	input := &athena.GetWorkGroupInput{
+		WorkGroup: &workGroup,
 	}
-	return outputLocation, err
+
+	resp, err := athenaClient.GetWorkGroup(context.Background(), input)
+	if err != nil {
+		return "", err
+	}
+
+	if resp.WorkGroup == nil || resp.WorkGroup.Configuration == nil || resp.WorkGroup.Configuration.ResultConfiguration == nil {
+		return "", fmt.Errorf("workgroup %s has no output location configured", workGroup)
+	}
+
+	outputLocation := resp.WorkGroup.Configuration.ResultConfiguration.OutputLocation
+	if outputLocation == nil || *outputLocation == "" {
+		return "", fmt.Errorf("workgroup %s has no output location configured", workGroup)
+	}
+
+	return *outputLocation, nil
 }

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/aws/aws-sdk-go/service/athena"
+	"github.com/aws/aws-sdk-go-v2/service/athena/types"
 )
 
 const (
@@ -14,24 +14,51 @@ const (
 	TimestampLayout             = "2006-01-02 15:04:05.999"
 	TimestampWithTimeZoneLayout = "2006-01-02 15:04:05.999 MST"
 	DateLayout                  = "2006-01-02"
+	nullStringResultModeGzipDL  = "\\N"
 )
 
-const nullStringResultModeGzipDL string = "\\N"
+type ColumnType string
 
-func convertRow(columns []*athena.ColumnInfo, in []*athena.Datum, ret []driver.Value) error {
+const (
+	ColumnTypeVarchar   ColumnType = "varchar"
+	ColumnTypeInteger   ColumnType = "integer"
+	ColumnTypeBoolean   ColumnType = "boolean"
+	ColumnTypeDouble    ColumnType = "double"
+	ColumnTypeTimestamp ColumnType = "timestamp"
+	// Add other types as needed
+)
+
+func NewColumnType(typeStr string) *ColumnType {
+	ct := ColumnType(typeStr)
+	return &ct
+}
+
+func (ct *ColumnType) DatabaseTypeName() string {
+	return string(*ct)
+}
+
+func (ct *ColumnType) ConvertValue(val string) (interface{}, error) {
+	switch *ct {
+	case ColumnTypeVarchar:
+		return val, nil
+	// Add other type conversions as needed
+	default:
+		return val, nil
+	}
+}
+
+func convertRow(columns []types.ColumnInfo, in []types.Datum, ret []driver.Value) error {
 	for i, val := range in {
 		coerced, err := convertValue(*columns[i].Type, val.VarCharValue)
 		if err != nil {
 			return err
 		}
-
 		ret[i] = coerced
 	}
-
 	return nil
 }
 
-func convertRowFromTableInfo(columns []*athena.Column, in []string, ret []driver.Value) error {
+func convertRowFromTableInfo(columns []types.Column, in []string, ret []driver.Value) error {
 	for i, val := range in {
 		var coerced interface{}
 		var err error
@@ -44,14 +71,12 @@ func convertRowFromTableInfo(columns []*athena.Column, in []string, ret []driver
 		if err != nil {
 			return err
 		}
-
 		ret[i] = coerced
 	}
-
 	return nil
 }
 
-func convertRowFromCsv(columns []*athena.ColumnInfo, in []downloadField, ret []driver.Value) error {
+func convertRowFromCsv(columns []types.ColumnInfo, in []downloadField, ret []driver.Value) error {
 	for i, df := range in {
 		var coerced interface{}
 		var err error
@@ -64,10 +89,8 @@ func convertRowFromCsv(columns []*athena.ColumnInfo, in []downloadField, ret []d
 		if err != nil {
 			return err
 		}
-
 		ret[i] = coerced
 	}
-
 	return nil
 }
 
