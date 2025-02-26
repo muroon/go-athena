@@ -100,6 +100,7 @@ func (d *Driver) Open(connStr string) (driver.Conn, error) {
 	}
 
 	return &conn{
+		config:         cfg.AWSConfig,
 		athena:         athenaClient,
 		db:             cfg.Database,
 		OutputLocation: cfg.OutputLocation,

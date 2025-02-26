@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/athena"
 	"github.com/aws/aws-sdk-go-v2/service/athena/types"
 	uuid "github.com/satori/go.uuid"
@@ -39,6 +40,7 @@ type GetQueryExecutionAPI interface {
 }
 
 type conn struct {
+	config         aws.Config
 	athena         *athena.Client
 	db             string
 	OutputLocation string
@@ -93,6 +95,7 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 	}
 
 	cfg := rowsConfig{
+		Config:         c.config,
 		Athena:         c.athena,
 		QueryID:        queryID,
 		DB:             c.db,

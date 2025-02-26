@@ -6,13 +6,10 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"io"
-	"net/url"
-	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/athena"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
@@ -34,6 +31,7 @@ func (ct *columnType) ConvertValue(val string) (interface{}, error) {
 }
 
 type rowsDL struct {
+	config     aws.Config
 	athena     *athena.Client
 	queryID    string
 	resultMode ResultMode
@@ -50,6 +48,7 @@ func newRowsDL(cfg rowsConfig) (*rowsDL, error) {
 		return nil, fmt.Errorf("invalid athena client type")
 	}
 	r := &rowsDL{
+		config:     cfg.Config,
 		athena:     client,
 		queryID:    cfg.QueryID,
 		resultMode: cfg.ResultMode,
@@ -65,7 +64,7 @@ func (r *rowsDL) init(cfg rowsConfig) error {
 
 	errChan := make(chan error, 2)
 	// download and set in memory
-	go r.downloadCsvAsync(ctx, errChan, cfg.OutputLocation)
+	go r.downloadCsvAsync(ctx, errChan, cfg.Config, cfg.OutputLocation)
 	// get table metadata
 	go r.getQueryResultsAsyncForCsv(ctx, errChan)
 
@@ -123,53 +122,21 @@ func (r *rowsDL) ColumnTypeDatabaseTypeName(index int) string {
 	return r.columnTypes[index].DatabaseTypeName()
 }
 
-func (r *rowsDL) downloadCsvAsync(ctx context.Context, errChan chan<- error, outputLocation string) {
+func (r *rowsDL) downloadCsvAsync(ctx context.Context, errChan chan<- error, cfg aws.Config, outputLocation string) {
 	defer func() {
 		errChan <- nil
 	}()
 
-	u, err := url.Parse(outputLocation)
-	if err != nil {
-		errChan <- fmt.Errorf("failed to parse output location: %v", err)
-		return
-	}
+	bucketName := outputLocation[5:]
 
-	key := strings.TrimPrefix(u.Path, "/")
-	key = fmt.Sprintf("%s/%s.csv", key, r.queryID)
-
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		errChan <- fmt.Errorf("failed to load AWS config: %v", err)
-		return
-	}
+	key := fmt.Sprintf("%s.csv", r.queryID)
 
 	// Get bucket region first
 	s3Client := s3.NewFromConfig(cfg)
-	region, err := s3Client.GetBucketLocation(ctx, &s3.GetBucketLocationInput{
-		Bucket: aws.String(u.Host),
-	})
-	if err != nil {
-		errChan <- fmt.Errorf("failed to get bucket location: %v", err)
-		return
-	}
-
-	// Get the actual region
-	bucketRegion := "us-east-1" // Default to us-east-1 if location constraint is null
-	if region.LocationConstraint != "" {
-		bucketRegion = string(region.LocationConstraint)
-	}
-
-	// Create a new client with the correct region
-	cfg, err = config.LoadDefaultConfig(ctx, config.WithRegion(bucketRegion))
-	if err != nil {
-		errChan <- fmt.Errorf("failed to load AWS config with region: %v", err)
-		return
-	}
-	s3Client = s3.NewFromConfig(cfg)
 
 	// Download CSV file
 	input := &s3.GetObjectInput{
-		Bucket: aws.String(u.Host),
+		Bucket: aws.String(bucketName),
 		Key:    aws.String(key),
 	}
 
@@ -218,6 +185,14 @@ func (r *rowsDL) getQueryResultsAsyncForCsv(ctx context.Context, errChan chan<- 
 		r.columnNames[i] = *info.Name
 		r.columnTypes[i] = newColumnType(*info.Type)
 	}
+
+	// tmp
+	for i, name := range r.columnNames {
+		fmt.Printf("columnNames[%d]: %s\n", i, name)
+		if columnType := r.columnTypes[i]; columnType != nil {
+			fmt.Printf("columnTypes[%d]: %s\n", i, columnType.DatabaseTypeName())
+		}
+	}
 }
 
 func getRecordsForDL(reader io.Reader) ([][]downloadField, error) {
@@ -260,6 +235,7 @@ func getRecordsForDL(reader io.Reader) ([][]downloadField, error) {
 				}
 				record = append(record, row)
 				field = ""
+				delimiter = false
 			} else {
 				field += string(r)
 			}

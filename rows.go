@@ -2,9 +2,12 @@ package athena
 
 import (
 	"database/sql/driver"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
 )
 
 type rowsConfig struct {
+	Config aws.Config
 	Athena interface {
 		GetQueryResultsAPI
 		StartQueryExecutionAPI
