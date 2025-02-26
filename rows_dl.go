@@ -137,19 +137,42 @@ func (r *rowsDL) downloadCsvAsync(ctx context.Context, errChan chan<- error, out
 	key := strings.TrimPrefix(u.Path, "/")
 	key = fmt.Sprintf("%s/%s.csv", key, r.queryID)
 
-	// Download CSV file
-	input := &s3.GetObjectInput{
-		Bucket: aws.String(u.Host),
-		Key:    aws.String(key),
-	}
-
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		errChan <- fmt.Errorf("failed to load AWS config: %v", err)
 		return
 	}
 
+	// Get bucket region first
 	s3Client := s3.NewFromConfig(cfg)
+	region, err := s3Client.GetBucketLocation(ctx, &s3.GetBucketLocationInput{
+		Bucket: aws.String(u.Host),
+	})
+	if err != nil {
+		errChan <- fmt.Errorf("failed to get bucket location: %v", err)
+		return
+	}
+
+	// Get the actual region
+	bucketRegion := "us-east-1" // Default to us-east-1 if location constraint is null
+	if region.LocationConstraint != "" {
+		bucketRegion = string(region.LocationConstraint)
+	}
+
+	// Create a new client with the correct region
+	cfg, err = config.LoadDefaultConfig(ctx, config.WithRegion(bucketRegion))
+	if err != nil {
+		errChan <- fmt.Errorf("failed to load AWS config with region: %v", err)
+		return
+	}
+	s3Client = s3.NewFromConfig(cfg)
+
+	// Download CSV file
+	input := &s3.GetObjectInput{
+		Bucket: aws.String(u.Host),
+		Key:    aws.String(key),
+	}
+
 	resp, err := s3Client.GetObject(ctx, input)
 	if err != nil {
 		errChan <- fmt.Errorf("failed to download CSV: %v", err)
