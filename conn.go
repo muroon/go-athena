@@ -17,6 +17,52 @@ import (
 	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
 )
 
+// Query type patterns
+var (
+	ddlQueryPattern    = regexp.MustCompile(`(?i)^(ALTER|CREATE|DESCRIBE|DROP|MSCK|SHOW)`)
+	selectQueryPattern = regexp.MustCompile(`(?i)^SELECT`)
+	ctasQueryPattern   = regexp.MustCompile(`(?i)^CREATE.+AS\s+SELECT`)
+)
+
+// QueryType represents the type of SQL query
+type QueryType int
+
+const (
+	QueryTypeUnknown QueryType = iota
+	QueryTypeDDL
+	QueryTypeSelect
+	QueryTypeCTAS
+)
+
+// GetQueryType determines the type of the query
+func GetQueryType(query string) QueryType {
+	switch {
+	case ddlQueryPattern.MatchString(query):
+		return QueryTypeDDL
+	case ctasQueryPattern.MatchString(query):
+		return QueryTypeCTAS
+	case selectQueryPattern.MatchString(query):
+		return QueryTypeSelect
+	default:
+		return QueryTypeUnknown
+	}
+}
+
+// isDDLQuery determines if the query is a DDL statement
+func isDDLQuery(query string) bool {
+	return GetQueryType(query) == QueryTypeDDL
+}
+
+// isSelectQuery determines if the query is a SELECT statement
+func isSelectQuery(query string) bool {
+	return GetQueryType(query) == QueryTypeSelect
+}
+
+// isCTASQuery determines if the query is a CREATE TABLE AS SELECT statement
+func isCTASQuery(query string) bool {
+	return GetQueryType(query) == QueryTypeCTAS
+}
+
 type conn struct {
 	athena         athenaiface.AthenaAPI
 	db             string
@@ -272,22 +318,6 @@ func (c *conn) Exec(query string, args []driver.Value) (driver.Result, error) {
 
 var _ driver.Queryer = (*conn)(nil)
 var _ driver.Execer = (*conn)(nil)
-
-// supported DDL statements by Athena
-// https://docs.aws.amazon.com/athena/latest/ug/language-reference.html
-var ddlQueryRegex = regexp.MustCompile(`(?i)^(ALTER|CREATE|DESCRIBE|DROP|MSCK|SHOW)`)
-
-func isDDLQuery(query string) bool {
-	return ddlQueryRegex.Match([]byte(query))
-}
-
-func isSelectQuery(query string) bool {
-	return regexp.MustCompile(`(?i)^SELECT`).Match([]byte(query))
-}
-
-func isCTASQuery(query string) bool {
-	return regexp.MustCompile(`(?i)^CREATE.+AS\s+SELECT`).Match([]byte(query))
-}
 
 func isCreatingCTASTable(isSelect bool, resultMode ResultMode) bool {
 	return isSelect && resultMode == ResultModeGzipDL

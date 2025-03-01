@@ -5,17 +5,34 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
-	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/athena"
 )
+
+// Error types
+var (
+	ErrConfigRequired    = errors.New("config is required")
+	ErrDatabaseRequired  = errors.New("database is required")
+	ErrSessionRequired   = errors.New("session is required")
+	ErrInvalidResultMode = errors.New("invalid result mode")
+)
+
+// wrapError wraps an error with additional context
+func wrapError(err error, message string) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", message, err)
+}
 
 var (
 	openFromSessionMutex sync.Mutex

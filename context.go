@@ -2,71 +2,76 @@ package athena
 
 import "context"
 
-const contextPrefix string = "go-athena"
+// contextKey is a type for context keys to ensure type safety
+type contextKey string
 
-/*
- * Result Mode
- */
+const contextPrefix = "go-athena"
 
-const resultModeContextKey string = "result_mode_key"
+// Context keys
+const (
+	resultModeKey contextKey = contextKey(contextPrefix + "result_mode_key")
+	timeoutKey    contextKey = contextKey(contextPrefix + "timeout_key")
+	catalogKey    contextKey = contextKey(contextPrefix + "catalog_key")
+)
 
-// ResultModeContextKey context key of setting result mode
-var ResultModeContextKey string = contextPrefix + resultModeContextKey
+// ResultModeContextKey is deprecated, use resultModeKey instead
+var ResultModeContextKey = string(resultModeKey)
 
-// SetAPIMode set APIMode to ResultMode from context
+// TimeoutContextKey is deprecated, use timeoutKey instead
+var TimeoutContextKey = string(timeoutKey)
+
+// CatalogContextKey is deprecated, use catalogKey instead
+var CatalogContextKey = string(catalogKey)
+
+// contextValue safely retrieves a typed value from context
+func contextValue[T any](ctx context.Context, key contextKey) (T, bool) {
+	v := ctx.Value(key)
+	if v == nil {
+		var zero T
+		return zero, false
+	}
+	val, ok := v.(T)
+	return val, ok
+}
+
+// SetResultMode sets the ResultMode in context
+func SetResultMode(ctx context.Context, mode ResultMode) context.Context {
+	return context.WithValue(ctx, resultModeKey, mode)
+}
+
+// SetAPIMode sets APIMode to ResultMode in context
 func SetAPIMode(ctx context.Context) context.Context {
-	return context.WithValue(ctx, ResultModeContextKey, ResultModeAPI)
+	return SetResultMode(ctx, ResultModeAPI)
 }
 
-// SetDLMode set DownloadMode to ResultMode from context
+// SetDLMode sets DownloadMode to ResultMode in context
 func SetDLMode(ctx context.Context) context.Context {
-	return context.WithValue(ctx, ResultModeContextKey, ResultModeDL)
+	return SetResultMode(ctx, ResultModeDL)
 }
 
-// SetGzipDLMode set CTASMode to ResultMode from context
+// SetGzipDLMode sets GzipDLMode to ResultMode in context
 func SetGzipDLMode(ctx context.Context) context.Context {
-	return context.WithValue(ctx, ResultModeContextKey, ResultModeGzipDL)
+	return SetResultMode(ctx, ResultModeGzipDL)
 }
 
 func getResultMode(ctx context.Context) (ResultMode, bool) {
-	val, ok := ctx.Value(ResultModeContextKey).(ResultMode)
-	return val, ok
+	return contextValue[ResultMode](ctx, resultModeKey)
 }
 
-/*
- * timeout
- */
-
-const timeoutContextKey string = "timeout_key"
-
-// TimeoutContextKey context key of setting timeout
-var TimeoutContextKey string = contextPrefix + timeoutContextKey
-
-// SetTimeout set timeout from context
+// SetTimeout sets timeout in context
 func SetTimeout(ctx context.Context, timeout uint) context.Context {
-	return context.WithValue(ctx, TimeoutContextKey, timeout)
+	return context.WithValue(ctx, timeoutKey, timeout)
 }
 
 func getTimeout(ctx context.Context) (uint, bool) {
-	val, ok := ctx.Value(TimeoutContextKey).(uint)
-	return val, ok
+	return contextValue[uint](ctx, timeoutKey)
 }
 
-/*
- * catalog
- */
-
-const catalogContextKey string = "catalog_key"
-
-// CatalogContextKey context key of setting catalog
-var CatalogContextKey string = contextPrefix + catalogContextKey
-
-// SetCatalog set catalog from context
+// SetCatalog sets catalog in context
 func SetCatalog(ctx context.Context, catalog string) context.Context {
-	return context.WithValue(ctx, CatalogContextKey, catalog)
+	return context.WithValue(ctx, catalogKey, catalog)
 }
 
 func getCatalog(ctx context.Context) (string, bool) {
-	val, ok := ctx.Value(CatalogContextKey).(string)
-	return val, ok
+	return contextValue[string](ctx, catalogKey)
 }
