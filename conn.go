@@ -24,6 +24,45 @@ var (
 	ctasQueryPattern   = regexp.MustCompile(`(?i)^CREATE.+AS\s+SELECT`)
 )
 
+// queryType represents the type of SQL query
+type queryType int
+
+const (
+	queryTypeUnknown queryType = iota
+	queryTypeDDL
+	queryTypeSelect
+	queryTypeCTAS
+)
+
+// getQueryType determines the type of the query
+func getQueryType(query string) queryType {
+	switch {
+	case ddlQueryPattern.MatchString(query):
+		return queryTypeDDL
+	case ctasQueryPattern.MatchString(query):
+		return queryTypeCTAS
+	case selectQueryPattern.MatchString(query):
+		return queryTypeSelect
+	default:
+		return queryTypeUnknown
+	}
+}
+
+// isDDLQuery determines if the query is a DDL statement
+func isDDLQuery(query string) bool {
+	return getQueryType(query) == queryTypeDDL
+}
+
+// isSelectQuery determines if the query is a SELECT statement
+func isSelectQuery(query string) bool {
+	return getQueryType(query) == queryTypeSelect
+}
+
+// isCTASQuery determines if the query is a CREATE TABLE AS SELECT statement
+func isCTASQuery(query string) bool {
+	return getQueryType(query) == queryTypeCTAS
+}
+
 // QueryType represents the type of SQL query
 type QueryType int
 
@@ -46,21 +85,6 @@ func GetQueryType(query string) QueryType {
 	default:
 		return QueryTypeUnknown
 	}
-}
-
-// isDDLQuery determines if the query is a DDL statement
-func isDDLQuery(query string) bool {
-	return GetQueryType(query) == QueryTypeDDL
-}
-
-// isSelectQuery determines if the query is a SELECT statement
-func isSelectQuery(query string) bool {
-	return GetQueryType(query) == QueryTypeSelect
-}
-
-// isCTASQuery determines if the query is a CREATE TABLE AS SELECT statement
-func isCTASQuery(query string) bool {
-	return GetQueryType(query) == QueryTypeCTAS
 }
 
 type conn struct {
