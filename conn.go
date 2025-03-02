@@ -124,6 +124,9 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 	isSelect := isSelectQuery(query)
 	resultMode := c.resultMode
 	if rmode, ok := getResultMode(ctx); ok {
+		if !isValidResultMode(rmode) {
+			return nil, ErrInvalidResultMode
+		}
 		resultMode = rmode
 	}
 	if !isSelect {
@@ -345,4 +348,14 @@ var _ driver.Execer = (*conn)(nil)
 
 func isCreatingCTASTable(isSelect bool, resultMode ResultMode) bool {
 	return isSelect && resultMode == ResultModeGzipDL
+}
+
+// isValidResultMode checks if the given result mode is valid
+func isValidResultMode(mode ResultMode) bool {
+	switch mode {
+	case ResultModeAPI, ResultModeDL, ResultModeGzipDL:
+		return true
+	default:
+		return false
+	}
 }

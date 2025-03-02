@@ -133,11 +133,11 @@ func (d *Driver) Open(connStr string) (driver.Conn, error) {
 // currently attempt to serialize all options into a string.
 func Open(cfg Config) (*sql.DB, error) {
 	if cfg.Database == "" {
-		return nil, errors.New("db is required")
+		return nil, ErrDatabaseRequired
 	}
 
 	if cfg.Session == nil {
-		return nil, errors.New("session is required")
+		return nil, ErrSessionRequired
 	}
 
 	if cfg.WorkGroup == "" {
@@ -172,7 +172,7 @@ type Config struct {
 func configFromConnectionString(connStr string) (*Config, error) {
 	args, err := url.ParseQuery(connStr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse connection string: %w", err)
 	}
 
 	var cfg Config
@@ -183,10 +183,14 @@ func configFromConnectionString(connStr string) (*Config, error) {
 	}
 	cfg.Session, err = session.NewSession(acfg...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create AWS session: %w", err)
 	}
 
 	cfg.Database = args.Get("db")
+	if cfg.Database == "" {
+		return nil, ErrDatabaseRequired
+	}
+
 	cfg.OutputLocation = args.Get("output_location")
 	cfg.WorkGroup = args.Get("workgroup")
 	if cfg.WorkGroup == "" {
@@ -197,7 +201,7 @@ func configFromConnectionString(connStr string) (*Config, error) {
 	if frequencyStr != "" {
 		cfg.PollFrequency, err = time.ParseDuration(frequencyStr)
 		if err != nil {
-			return nil, fmt.Errorf("invalid poll_frequency parameter: %s", frequencyStr)
+			return nil, fmt.Errorf("invalid poll_frequency parameter: %w", err)
 		}
 	}
 
@@ -208,6 +212,8 @@ func configFromConnectionString(connStr string) (*Config, error) {
 		cfg.ResultMode = ResultModeDL
 	case modeValue == "gzip":
 		cfg.ResultMode = ResultModeGzipDL
+	case modeValue != "" && modeValue != "api":
+		return nil, ErrInvalidResultMode
 	}
 
 	cfg.Timeout = timeOutLimitDefault
