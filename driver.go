@@ -26,14 +26,6 @@ var (
 	ErrInvalidResultMode = errors.New("invalid result mode")
 )
 
-// wrapError wraps an error with additional context
-func wrapError(err error, message string) error {
-	if err == nil {
-		return nil
-	}
-	return fmt.Errorf("%s: %w", message, err)
-}
-
 var (
 	openFromSessionMutex sync.Mutex
 	openFromSessionCount int
