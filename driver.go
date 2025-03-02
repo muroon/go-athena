@@ -1,6 +1,7 @@
 package athena
 
 import (
+	"context"
 	"database/sql"
 	"database/sql/driver"
 	"errors"
@@ -11,11 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
-
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/athena"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/athena"
 )
 
 // Error types
@@ -96,7 +95,7 @@ func (d *Driver) Open(connStr string) (driver.Conn, error) {
 	}
 
 	// athena client
-	athenaClient := athena.New(cfg.Session)
+	athenaClient := athena.NewFromConfig(cfg.Config)
 
 	// output location (with empty value)
 	if checkOutputLocation(cfg.ResultMode, cfg.OutputLocation) {
@@ -114,13 +113,13 @@ func (d *Driver) Open(connStr string) (driver.Conn, error) {
 		pollFrequency:  cfg.PollFrequency,
 		workgroup:      cfg.WorkGroup,
 		resultMode:     cfg.ResultMode,
-		session:        cfg.Session,
+		config:         cfg.Config,
 		timeout:        cfg.Timeout,
 		catalog:        cfg.Catalog,
 	}, nil
 }
 
-// Open is a more robust version of `db.Open`, as it accepts a raw aws.Session.
+// Open is a more robust version of `db.Open`, as it accepts a raw aws.Config.
 // This is useful if you have a complex AWS session since the driver doesn't
 // currently attempt to serialize all options into a string.
 func Open(cfg Config) (*sql.DB, error) {
@@ -128,7 +127,7 @@ func Open(cfg Config) (*sql.DB, error) {
 		return nil, ErrDatabaseRequired
 	}
 
-	if cfg.Session == nil {
+	if cfg.Config == (aws.Config{}) {
 		return nil, ErrSessionRequired
 	}
 
@@ -149,7 +148,7 @@ func Open(cfg Config) (*sql.DB, error) {
 
 // Config is the input to Open().
 type Config struct {
-	Session        *session.Session
+	Config         aws.Config
 	Database       string
 	OutputLocation string
 	WorkGroup      string
@@ -169,14 +168,20 @@ func configFromConnectionString(connStr string) (*Config, error) {
 
 	var cfg Config
 
-	var acfg []*aws.Config
-	if region := args.Get("region"); region != "" {
-		acfg = append(acfg, &aws.Config{Region: aws.String(region)})
+	// Setup AWS config
+	ctx := context.Background()
+	region := args.Get("region")
+
+	var optFns []func(*config.LoadOptions) error
+	if region != "" {
+		optFns = append(optFns, config.WithRegion(region))
 	}
-	cfg.Session, err = session.NewSession(acfg...)
+
+	awsCfg, err := config.LoadDefaultConfig(ctx, optFns...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create AWS session: %w", err)
+		return nil, fmt.Errorf("failed to create AWS config: %w", err)
 	}
+	cfg.Config = awsCfg
 
 	cfg.Database = args.Get("db")
 	if cfg.Database == "" {
@@ -210,7 +215,7 @@ func configFromConnectionString(connStr string) (*Config, error) {
 
 	cfg.Timeout = timeOutLimitDefault
 	if tm := args.Get("timeout"); tm != "" {
-		if timeout, err := strconv.ParseUint(tm, 10, 32); err != nil {
+		if timeout, err := strconv.ParseUint(tm, 10, 32); err == nil {
 			cfg.Timeout = uint(timeout)
 		}
 	}
@@ -229,9 +234,11 @@ func checkOutputLocation(resultMode ResultMode, outputLocation string) bool {
 }
 
 // getOutputLocation is for getting output location value from workgroup when location value is empty.
-func getOutputLocation(athenaClient athenaiface.AthenaAPI, workGroup string) (string, error) {
+func getOutputLocation(athenaClient AthenaAPI, workGroup string) (string, error) {
+	ctx := context.Background()
 	var outputLocation string
 	output, err := athenaClient.GetWorkGroup(
+		ctx,
 		&athena.GetWorkGroupInput{
 			WorkGroup: aws.String(workGroup),
 		},

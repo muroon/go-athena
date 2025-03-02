@@ -11,10 +11,9 @@ import (
 
 	uuid "github.com/satori/go.uuid"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/athena"
-	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/athena"
+	"github.com/aws/aws-sdk-go-v2/service/athena/types"
 )
 
 // Query type patterns
@@ -88,7 +87,7 @@ func GetQueryType(query string) QueryType {
 }
 
 type conn struct {
-	athena         athenaiface.AthenaAPI
+	athena         AthenaAPI
 	db             string
 	OutputLocation string
 	workgroup      string
@@ -96,7 +95,7 @@ type conn struct {
 	pollFrequency time.Duration
 
 	resultMode ResultMode
-	session    *session.Session
+	config     aws.Config
 	timeout    uint
 	catalog    string
 }
@@ -164,7 +163,7 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 		afterDownload = c.dropCTASTable(ctx, ctasTable)
 	}
 
-	queryID, err := c.startQuery(query)
+	queryID, err := c.startQuery(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +177,7 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 		QueryID:        queryID,
 		SkipHeader:     !isDDLQuery(query),
 		ResultMode:     resultMode,
-		Session:        c.session,
+		Config:         c.config,
 		OutputLocation: c.OutputLocation,
 		Timeout:        timeout,
 		AfterDownload:  afterDownload,
@@ -192,7 +191,7 @@ func (c *conn) dropCTASTable(ctx context.Context, table string) func() error {
 	return func() error {
 		query := fmt.Sprintf("DROP TABLE %s", table)
 
-		queryID, err := c.startQuery(query)
+		queryID, err := c.startQuery(ctx, query)
 		if err != nil {
 			return err
 		}
@@ -202,13 +201,13 @@ func (c *conn) dropCTASTable(ctx context.Context, table string) func() error {
 }
 
 // startQuery starts an Athena query and returns its ID.
-func (c *conn) startQuery(query string) (string, error) {
-	resp, err := c.athena.StartQueryExecution(&athena.StartQueryExecutionInput{
+func (c *conn) startQuery(ctx context.Context, query string) (string, error) {
+	resp, err := c.athena.StartQueryExecution(ctx, &athena.StartQueryExecutionInput{
 		QueryString: aws.String(query),
-		QueryExecutionContext: &athena.QueryExecutionContext{
+		QueryExecutionContext: &types.QueryExecutionContext{
 			Database: aws.String(c.db),
 		},
-		ResultConfiguration: &athena.ResultConfiguration{
+		ResultConfiguration: &types.ResultConfiguration{
 			OutputLocation: aws.String(c.OutputLocation),
 		},
 		WorkGroup: aws.String(c.workgroup),
@@ -223,28 +222,28 @@ func (c *conn) startQuery(query string) (string, error) {
 // waitOnQuery blocks until a query finishes, returning an error if it failed.
 func (c *conn) waitOnQuery(ctx context.Context, queryID string) error {
 	for {
-		statusResp, err := c.athena.GetQueryExecutionWithContext(ctx, &athena.GetQueryExecutionInput{
+		statusResp, err := c.athena.GetQueryExecution(ctx, &athena.GetQueryExecutionInput{
 			QueryExecutionId: aws.String(queryID),
 		})
 		if err != nil {
 			return err
 		}
 
-		switch *statusResp.QueryExecution.Status.State {
-		case athena.QueryExecutionStateCancelled:
+		switch statusResp.QueryExecution.Status.State {
+		case types.QueryExecutionStateCancelled:
 			return context.Canceled
-		case athena.QueryExecutionStateFailed:
+		case types.QueryExecutionStateFailed:
 			reason := *statusResp.QueryExecution.Status.StateChangeReason
 			return errors.New(reason)
-		case athena.QueryExecutionStateSucceeded:
+		case types.QueryExecutionStateSucceeded:
 			return nil
-		case athena.QueryExecutionStateQueued:
-		case athena.QueryExecutionStateRunning:
+		case types.QueryExecutionStateQueued:
+		case types.QueryExecutionStateRunning:
 		}
 
 		select {
 		case <-ctx.Done():
-			c.athena.StopQueryExecution(&athena.StopQueryExecutionInput{
+			c.athena.StopQueryExecution(ctx, &athena.StopQueryExecutionInput{
 				QueryExecutionId: aws.String(queryID),
 			})
 
@@ -302,7 +301,7 @@ func (c *conn) prepareContext(ctx context.Context, query string) (driver.Stmt, e
 	prepareKey := fmt.Sprintf("tmp_prepare_%v", strings.Replace(uuid.NewV4().String(), "-", "", -1))
 	newQuery := fmt.Sprintf("PREPARE %s FROM %s", prepareKey, query)
 
-	queryID, err := c.startQuery(newQuery)
+	queryID, err := c.startQuery(ctx, newQuery)
 	if err != nil {
 		return nil, err
 	}

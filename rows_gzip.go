@@ -6,16 +6,16 @@ import (
 	"context"
 	"database/sql/driver"
 	"fmt"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/athena"
-	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"io"
+	"io/ioutil"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/athena"
+	"github.com/aws/aws-sdk-go-v2/service/athena/types"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 const (
@@ -23,7 +23,7 @@ const (
 )
 
 type rowsGzipDL struct {
-	athena     athenaiface.AthenaAPI
+	athena     AthenaAPI
 	queryID    string
 	resultMode ResultMode
 
@@ -34,7 +34,7 @@ type rowsGzipDL struct {
 	ctasTable        string
 	db               string
 	catalog          string
-	ctasTableColumns []*athena.Column
+	ctasTableColumns []types.Column
 }
 
 func newRowsGzipDL(cfg rowsConfig) (*rowsGzipDL, error) {
@@ -58,7 +58,7 @@ func (r *rowsGzipDL) init(cfg rowsConfig) error {
 	err := make(chan error, 2)
 
 	// download and set in memory
-	go r.downloadCompressedDataAsync(ctx, err, cfg.Session, cfg.OutputLocation)
+	go r.downloadCompressedDataAsync(ctx, err, cfg.Config, cfg.OutputLocation)
 
 	// get table metadata
 	go r.getTableAsync(ctx, err)
@@ -87,57 +87,72 @@ func (r *rowsGzipDL) init(cfg rowsConfig) error {
 func (r *rowsGzipDL) downloadCompressedDataAsync(
 	ctx context.Context,
 	errCh chan error,
-	sess *session.Session,
+	cfg aws.Config,
 	location string,
 ) {
-	errCh <- r.downloadCompressedData(sess, location)
+	errCh <- r.downloadCompressedData(ctx, cfg, location)
 }
 
-func (r *rowsGzipDL) downloadCompressedData(sess *session.Session, location string) error {
+func (r *rowsGzipDL) downloadCompressedData(ctx context.Context, cfg aws.Config, location string) error {
 	if location[len(location)-1:] == "/" {
 		location = location[:len(location)-1]
 	}
 
 	// remove the first 5 characters "s3://" from location
 	bucketName := location[5:]
+	slash := strings.Index(bucketName, "/")
+	if slash == -1 {
+		return fmt.Errorf("invalid S3 location format: %s", location)
+	}
+	bucket := bucketName[:slash]
+	prefix := bucketName[slash+1:]
+
+	// Create an S3 client
+	s3Client := s3.NewFromConfig(cfg)
 
 	// get gz file path
-	buff := &aws.WriteAtBuffer{}
-
-	downloader := s3manager.NewDownloader(sess)
-	_, err := downloader.Download(buff, &s3.GetObjectInput{
-		Bucket: aws.String(bucketName),
-		Key:    aws.String(fmt.Sprintf("tables/%s-manifest.csv", r.queryID)),
+	resp, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(fmt.Sprintf("%s/tables/%s-manifest.csv", prefix, r.queryID)),
 	})
 	if err != nil {
 		return err
 	}
 
+	// Read the manifest file content
+	data, err := ioutil.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+
 	start := len(location) + 1 // the path is "location/objectKey"
-	objectKeys, err := getObjectKeysForGzip(strings.NewReader(string(buff.Bytes())), start)
+	objectKeys, err := getObjectKeysForGzip(strings.NewReader(string(data)), start)
 	if err != nil {
 		return err
 	}
 
 	for _, objectKey := range objectKeys {
-		buff := &aws.WriteAtBuffer{}
-
-		_, err := downloader.Download(buff, &s3.GetObjectInput{
-			Bucket: aws.String(bucketName),
+		resp, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
+			Bucket: aws.String(bucket),
 			Key:    aws.String(objectKey),
 		})
 		if err != nil {
 			return err
 		}
 
-		bfData := buff.Bytes()
-
-		// decompress gzip
-		gzipReader, err := gzip.NewReader(strings.NewReader(string(bfData)))
+		// Read the object content
+		data, err := ioutil.ReadAll(resp.Body)
+		resp.Body.Close()
 		if err != nil {
 			return err
 		}
 
+		// decompress gzip
+		gzipReader, err := gzip.NewReader(strings.NewReader(string(data)))
+		if err != nil {
+			return err
+		}
 		datas, err := getRecordsFromGzip(gzipReader)
 		if err != nil {
 			return err
@@ -154,7 +169,8 @@ func (r *rowsGzipDL) downloadCompressedData(sess *session.Session, location stri
 }
 
 func (r *rowsGzipDL) getTableAsync(ctx context.Context, errCh chan error) {
-	data, err := r.athena.GetTableMetadata(&athena.GetTableMetadataInput{
+	client := athena.NewFromConfig(aws.Config{})
+	data, err := client.GetTableMetadata(ctx, &athena.GetTableMetadataInput{
 		CatalogName:  aws.String(r.catalog),
 		DatabaseName: aws.String(r.db),
 		TableName:    aws.String(r.ctasTable),
@@ -184,7 +200,7 @@ func (r *rowsGzipDL) nextCTAS(dest []driver.Value) error {
 
 func (r *rowsGzipDL) columnTypeDatabaseTypeNameForCTAS(index int) string {
 	column := r.ctasTableColumns[index]
-	if column == nil || column.Type == nil {
+	if column.Type == nil {
 		return ""
 	}
 	return *column.Type

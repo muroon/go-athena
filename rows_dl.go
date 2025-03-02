@@ -5,20 +5,19 @@ import (
 	"context"
 	"database/sql/driver"
 	"fmt"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/athena"
-	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"io"
+	"io/ioutil"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/athena"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 type rowsDL struct {
-	athena         athenaiface.AthenaAPI
+	athena         AthenaAPI
 	queryID        string
 	resultMode     ResultMode
 	out            *athena.GetQueryResultsOutput
@@ -43,7 +42,7 @@ func (r *rowsDL) init(cfg rowsConfig) error {
 	err := make(chan error, 2)
 
 	// download and set in memory
-	go r.downloadCsvAsync(ctx, err, cfg.Session, cfg.OutputLocation)
+	go r.downloadCsvAsync(ctx, err, cfg.Config, cfg.OutputLocation)
 
 	// get table metadata
 	go r.getQueryResultsAsyncForCsv(ctx, err)
@@ -64,45 +63,55 @@ func (r *rowsDL) init(cfg rowsConfig) error {
 func (r *rowsDL) downloadCsvAsync(
 	ctx context.Context,
 	errCh chan error,
-	sess *session.Session,
+	cfg aws.Config,
 	location string,
 ) {
-	errCh <- r.downloadCsv(sess, location)
+	errCh <- r.downloadCsv(ctx, cfg, location)
 }
 
-func (r *rowsDL) downloadCsv(sess *session.Session, location string) error {
+func (r *rowsDL) downloadCsv(ctx context.Context, cfg aws.Config, location string) error {
 	// remove the first 5 characters "s3://" from location
 	bucketName := location[5:]
-	objectKey := fmt.Sprintf("%s.csv", r.queryID)
+	slash := strings.Index(bucketName, "/")
+	if slash == -1 {
+		return fmt.Errorf("invalid S3 location format: %s", location)
+	}
+	bucket := bucketName[:slash]
+	prefix := bucketName[slash+1:]
+	objectKey := fmt.Sprintf("%s%s.csv", prefix, r.queryID)
 
-	buff := &aws.WriteAtBuffer{}
-	downloader := s3manager.NewDownloader(sess)
-	_, err := downloader.Download(buff, &s3.GetObjectInput{
-		Bucket: aws.String(bucketName),
+	// Create an S3 client
+	s3Client := s3.NewFromConfig(cfg)
+	resp, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
 		Key:    aws.String(objectKey),
 	})
 	if err != nil {
 		return err
 	}
 
-	bfData := buff.Bytes()
+	// Read the object content
+	data, err := ioutil.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
 
-	fields, err := getRecordsForDL(strings.NewReader(string(bfData)))
+	fields, err := getRecordsForDL(strings.NewReader(string(data)))
 	if err != nil {
 		return err
 	}
 	r.downloadedRows = &downloadedRows{
 		field: fields[1:],
 	}
-
 	return nil
 }
 
 func (r *rowsDL) getQueryResultsAsyncForCsv(ctx context.Context, errCh chan error) {
 	var err error
-	r.out, err = r.athena.GetQueryResults(&athena.GetQueryResultsInput{
+	r.out, err = r.athena.GetQueryResults(ctx, &athena.GetQueryResultsInput{
 		QueryExecutionId: aws.String(r.queryID),
-		MaxResults:       aws.Int64(1),
+		MaxResults:       aws.Int32(1),
 	})
 	errCh <- err
 }
