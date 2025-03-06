@@ -6,7 +6,6 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -72,18 +71,12 @@ func (r *rowsDL) downloadCsvAsync(
 func (r *rowsDL) downloadCsv(ctx context.Context, cfg aws.Config, location string) error {
 	// remove the first 5 characters "s3://" from location
 	bucketName := location[5:]
-	slash := strings.Index(bucketName, "/")
-	if slash == -1 {
-		return fmt.Errorf("invalid S3 location format: %s", location)
-	}
-	bucket := bucketName[:slash]
-	prefix := bucketName[slash+1:]
-	objectKey := fmt.Sprintf("%s%s.csv", prefix, r.queryID)
+	objectKey := fmt.Sprintf("%s.csv", r.queryID)
 
 	// Create an S3 client
 	s3Client := s3.NewFromConfig(cfg)
 	resp, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(bucket),
+		Bucket: aws.String(bucketName),
 		Key:    aws.String(objectKey),
 	})
 	if err != nil {
@@ -91,7 +84,7 @@ func (r *rowsDL) downloadCsv(ctx context.Context, cfg aws.Config, location strin
 	}
 
 	// Read the object content
-	data, err := ioutil.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if err != nil {
 		return err
