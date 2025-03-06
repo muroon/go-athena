@@ -5,9 +5,9 @@ import (
 	"compress/gzip"
 	"context"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -100,27 +100,21 @@ func (r *rowsGzipDL) downloadCompressedData(ctx context.Context, cfg aws.Config,
 
 	// remove the first 5 characters "s3://" from location
 	bucketName := location[5:]
-	slash := strings.Index(bucketName, "/")
-	if slash == -1 {
-		return fmt.Errorf("invalid S3 location format: %s", location)
-	}
-	bucket := bucketName[:slash]
-	prefix := bucketName[slash+1:]
 
 	// Create an S3 client
 	s3Client := s3.NewFromConfig(cfg)
 
 	// get gz file path
 	resp, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(fmt.Sprintf("%s/tables/%s-manifest.csv", prefix, r.queryID)),
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(fmt.Sprintf("tables/%s-manifest.csv", r.queryID)),
 	})
 	if err != nil {
 		return err
 	}
 
 	// Read the manifest file content
-	data, err := ioutil.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if err != nil {
 		return err
@@ -134,7 +128,7 @@ func (r *rowsGzipDL) downloadCompressedData(ctx context.Context, cfg aws.Config,
 
 	for _, objectKey := range objectKeys {
 		resp, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
-			Bucket: aws.String(bucket),
+			Bucket: aws.String(bucketName),
 			Key:    aws.String(objectKey),
 		})
 		if err != nil {
@@ -142,7 +136,7 @@ func (r *rowsGzipDL) downloadCompressedData(ctx context.Context, cfg aws.Config,
 		}
 
 		// Read the object content
-		data, err := ioutil.ReadAll(resp.Body)
+		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
 			return err
@@ -169,8 +163,13 @@ func (r *rowsGzipDL) downloadCompressedData(ctx context.Context, cfg aws.Config,
 }
 
 func (r *rowsGzipDL) getTableAsync(ctx context.Context, errCh chan error) {
-	client := athena.NewFromConfig(aws.Config{})
-	data, err := client.GetTableMetadata(ctx, &athena.GetTableMetadataInput{
+	athenaClient, ok := r.athena.(*athena.Client)
+	if !ok {
+		errCh <- errors.New("rowsGzipDL athena client is not of athena.Client")
+		return
+	}
+
+	data, err := athenaClient.GetTableMetadata(ctx, &athena.GetTableMetadataInput{
 		CatalogName:  aws.String(r.catalog),
 		DatabaseName: aws.String(r.db),
 		TableName:    aws.String(r.ctasTable),
