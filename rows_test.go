@@ -29,7 +29,7 @@ var queryToResultsGenMap = map[string]genQueryResultsOutputByToken{
 func genColumnInfo(column string) types.ColumnInfo {
 	caseSensitive := true
 	catalogName := "hive"
-	nullable := "UNKNOWN"
+	nullable := types.ColumnNullableUnknown
 	precision := int32(2147483647)
 	scale := int32(0)
 	schemaName := ""
@@ -37,11 +37,11 @@ func genColumnInfo(column string) types.ColumnInfo {
 	columnType := "varchar"
 
 	return types.ColumnInfo{
-		CaseSensitive: &caseSensitive,
+		CaseSensitive: caseSensitive,
 		CatalogName:   &catalogName,
-		Nullable:      &nullable,
-		Precision:     &precision,
-		Scale:         &scale,
+		Nullable:      nullable,
+		Precision:     precision,
+		Scale:         scale,
 		SchemaName:    &schemaName,
 		TableName:     &tableName,
 		Type:          &columnType,

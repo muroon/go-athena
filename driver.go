@@ -127,7 +127,8 @@ func Open(cfg Config) (*sql.DB, error) {
 		return nil, ErrDatabaseRequired
 	}
 
-	if cfg.Config == (aws.Config{}) {
+	// Check if AWS config is empty by checking Region field instead of comparing the whole struct
+	if cfg.Config.Region == "" {
 		return nil, ErrSessionRequired
 	}
 
