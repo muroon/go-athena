@@ -10,7 +10,7 @@ import (
 )
 
 type rowsAPI struct {
-	athena     *athena.Client
+	athena     athena.GetQueryResultsAPIClient
 	queryID    string
 	resultMode ResultMode
 

@@ -205,7 +205,6 @@ func dummyFailedIterationResponse(token *string) (*athena.GetQueryResultsOutput,
 }
 
 type mockAthenaClient struct {
-	athena.Client
 }
 
 func (m *mockAthenaClient) GetQueryResults(ctx context.Context, input *athena.GetQueryResultsInput, optFns ...func(*athena.Options)) (*athena.GetQueryResultsOutput, error) {
@@ -218,6 +217,17 @@ func (m *mockAthenaClient) GetQueryResults(ctx context.Context, input *athena.Ge
 
 func castToValue(dest ...driver.Value) []driver.Value {
 	return dest
+}
+
+func newRowsAPIForTest(cfg rowsConfig) (*rowsAPI, error) {
+	r := &rowsAPI{
+		athena:        new(mockAthenaClient),
+		queryID:       cfg.QueryID,
+		skipHeaderRow: cfg.SkipHeader,
+		resultMode:    cfg.ResultMode,
+	}
+	err := r.init(cfg)
+	return r, err
 }
 
 func TestRows_Next(t *testing.T) {
@@ -257,8 +267,7 @@ func TestRows_Next(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		r, _ := newRows(rowsConfig{
-			Athena:     new(mockAthenaClient),
+		r, _ := newRowsAPIForTest(rowsConfig{
 			QueryID:    test.queryID,
 			SkipHeader: test.skipHeader,
 			Config:     aws.Config{},
