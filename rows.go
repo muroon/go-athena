@@ -4,10 +4,11 @@ import (
 	"database/sql/driver"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/athena"
 )
 
 type rowsConfig struct {
-	Athena         AthenaAPI
+	Athena         *athena.Client
 	QueryID        string
 	SkipHeader     bool
 	ResultMode     ResultMode

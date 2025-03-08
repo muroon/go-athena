@@ -5,7 +5,6 @@ import (
 	"compress/gzip"
 	"context"
 	"database/sql/driver"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -23,7 +22,7 @@ const (
 )
 
 type rowsGzipDL struct {
-	athena     AthenaAPI
+	athena     *athena.Client
 	queryID    string
 	resultMode ResultMode
 
@@ -163,13 +162,7 @@ func (r *rowsGzipDL) downloadCompressedData(ctx context.Context, cfg aws.Config,
 }
 
 func (r *rowsGzipDL) getTableAsync(ctx context.Context, errCh chan error) {
-	athenaClient, ok := r.athena.(*athena.Client)
-	if !ok {
-		errCh <- errors.New("rowsGzipDL athena client is not of athena.Client")
-		return
-	}
-
-	data, err := athenaClient.GetTableMetadata(ctx, &athena.GetTableMetadataInput{
+	data, err := r.athena.GetTableMetadata(ctx, &athena.GetTableMetadataInput{
 		CatalogName:  aws.String(r.catalog),
 		DatabaseName: aws.String(r.db),
 		TableName:    aws.String(r.ctasTable),

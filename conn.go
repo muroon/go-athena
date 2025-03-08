@@ -87,7 +87,7 @@ func GetQueryType(query string) QueryType {
 }
 
 type conn struct {
-	athena         AthenaAPI
+	athena         *athena.Client
 	db             string
 	OutputLocation string
 	workgroup      string

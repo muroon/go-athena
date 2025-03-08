@@ -235,7 +235,7 @@ func checkOutputLocation(resultMode ResultMode, outputLocation string) bool {
 }
 
 // getOutputLocation is for getting output location value from workgroup when location value is empty.
-func getOutputLocation(athenaClient AthenaAPI, workGroup string) (string, error) {
+func getOutputLocation(athenaClient *athena.Client, workGroup string) (string, error) {
 	ctx := context.Background()
 	var outputLocation string
 	output, err := athenaClient.GetWorkGroup(

@@ -205,7 +205,7 @@ func dummyFailedIterationResponse(token *string) (*athena.GetQueryResultsOutput,
 }
 
 type mockAthenaClient struct {
-	AthenaAPI
+	athena.Client
 }
 
 func (m *mockAthenaClient) GetQueryResults(ctx context.Context, input *athena.GetQueryResultsInput, optFns ...func(*athena.Options)) (*athena.GetQueryResultsOutput, error) {

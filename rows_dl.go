@@ -16,7 +16,7 @@ import (
 )
 
 type rowsDL struct {
-	athena         AthenaAPI
+	athena         *athena.Client
 	queryID        string
 	resultMode     ResultMode
 	out            *athena.GetQueryResultsOutput
