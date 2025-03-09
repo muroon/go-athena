@@ -62,30 +62,6 @@ func isCTASQuery(query string) bool {
 	return getQueryType(query) == queryTypeCTAS
 }
 
-// QueryType represents the type of SQL query
-type QueryType int
-
-const (
-	QueryTypeUnknown QueryType = iota
-	QueryTypeDDL
-	QueryTypeSelect
-	QueryTypeCTAS
-)
-
-// GetQueryType determines the type of the query
-func GetQueryType(query string) QueryType {
-	switch {
-	case ddlQueryPattern.MatchString(query):
-		return QueryTypeDDL
-	case ctasQueryPattern.MatchString(query):
-		return QueryTypeCTAS
-	case selectQueryPattern.MatchString(query):
-		return QueryTypeSelect
-	default:
-		return QueryTypeUnknown
-	}
-}
-
 type conn struct {
 	athena         *athena.Client
 	db             string
