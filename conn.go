@@ -11,14 +11,59 @@ import (
 
 	uuid "github.com/satori/go.uuid"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/athena"
-	"github.com/aws/aws-sdk-go/service/athena/athenaiface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/athena"
+	"github.com/aws/aws-sdk-go-v2/service/athena/types"
 )
 
+// Query type patterns
+var (
+	ddlQueryPattern    = regexp.MustCompile(`(?i)^(ALTER|CREATE|DESCRIBE|DROP|MSCK|SHOW)`)
+	selectQueryPattern = regexp.MustCompile(`(?i)^SELECT`)
+	ctasQueryPattern   = regexp.MustCompile(`(?i)^CREATE.+AS\s+SELECT`)
+)
+
+// queryType represents the type of SQL query
+type queryType int
+
+const (
+	queryTypeUnknown queryType = iota
+	queryTypeDDL
+	queryTypeSelect
+	queryTypeCTAS
+)
+
+// getQueryType determines the type of the query
+func getQueryType(query string) queryType {
+	switch {
+	case ddlQueryPattern.MatchString(query):
+		return queryTypeDDL
+	case ctasQueryPattern.MatchString(query):
+		return queryTypeCTAS
+	case selectQueryPattern.MatchString(query):
+		return queryTypeSelect
+	default:
+		return queryTypeUnknown
+	}
+}
+
+// isDDLQuery determines if the query is a DDL statement
+func isDDLQuery(query string) bool {
+	return getQueryType(query) == queryTypeDDL
+}
+
+// isSelectQuery determines if the query is a SELECT statement
+func isSelectQuery(query string) bool {
+	return getQueryType(query) == queryTypeSelect
+}
+
+// isCTASQuery determines if the query is a CREATE TABLE AS SELECT statement
+func isCTASQuery(query string) bool {
+	return getQueryType(query) == queryTypeCTAS
+}
+
 type conn struct {
-	athena         athenaiface.AthenaAPI
+	athena         *athena.Client
 	db             string
 	OutputLocation string
 	workgroup      string
@@ -26,7 +71,7 @@ type conn struct {
 	pollFrequency time.Duration
 
 	resultMode ResultMode
-	session    *session.Session
+	config     aws.Config
 	timeout    uint
 	catalog    string
 }
@@ -54,6 +99,9 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 	isSelect := isSelectQuery(query)
 	resultMode := c.resultMode
 	if rmode, ok := getResultMode(ctx); ok {
+		if !isValidResultMode(rmode) {
+			return nil, ErrInvalidResultMode
+		}
 		resultMode = rmode
 	}
 	if !isSelect {
@@ -91,7 +139,7 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 		afterDownload = c.dropCTASTable(ctx, ctasTable)
 	}
 
-	queryID, err := c.startQuery(query)
+	queryID, err := c.startQuery(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +153,7 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 		QueryID:        queryID,
 		SkipHeader:     !isDDLQuery(query),
 		ResultMode:     resultMode,
-		Session:        c.session,
+		Config:         c.config,
 		OutputLocation: c.OutputLocation,
 		Timeout:        timeout,
 		AfterDownload:  afterDownload,
@@ -119,7 +167,7 @@ func (c *conn) dropCTASTable(ctx context.Context, table string) func() error {
 	return func() error {
 		query := fmt.Sprintf("DROP TABLE %s", table)
 
-		queryID, err := c.startQuery(query)
+		queryID, err := c.startQuery(ctx, query)
 		if err != nil {
 			return err
 		}
@@ -129,13 +177,13 @@ func (c *conn) dropCTASTable(ctx context.Context, table string) func() error {
 }
 
 // startQuery starts an Athena query and returns its ID.
-func (c *conn) startQuery(query string) (string, error) {
-	resp, err := c.athena.StartQueryExecution(&athena.StartQueryExecutionInput{
+func (c *conn) startQuery(ctx context.Context, query string) (string, error) {
+	resp, err := c.athena.StartQueryExecution(ctx, &athena.StartQueryExecutionInput{
 		QueryString: aws.String(query),
-		QueryExecutionContext: &athena.QueryExecutionContext{
+		QueryExecutionContext: &types.QueryExecutionContext{
 			Database: aws.String(c.db),
 		},
-		ResultConfiguration: &athena.ResultConfiguration{
+		ResultConfiguration: &types.ResultConfiguration{
 			OutputLocation: aws.String(c.OutputLocation),
 		},
 		WorkGroup: aws.String(c.workgroup),
@@ -150,28 +198,28 @@ func (c *conn) startQuery(query string) (string, error) {
 // waitOnQuery blocks until a query finishes, returning an error if it failed.
 func (c *conn) waitOnQuery(ctx context.Context, queryID string) error {
 	for {
-		statusResp, err := c.athena.GetQueryExecutionWithContext(ctx, &athena.GetQueryExecutionInput{
+		statusResp, err := c.athena.GetQueryExecution(ctx, &athena.GetQueryExecutionInput{
 			QueryExecutionId: aws.String(queryID),
 		})
 		if err != nil {
 			return err
 		}
 
-		switch *statusResp.QueryExecution.Status.State {
-		case athena.QueryExecutionStateCancelled:
+		switch statusResp.QueryExecution.Status.State {
+		case types.QueryExecutionStateCancelled:
 			return context.Canceled
-		case athena.QueryExecutionStateFailed:
+		case types.QueryExecutionStateFailed:
 			reason := *statusResp.QueryExecution.Status.StateChangeReason
 			return errors.New(reason)
-		case athena.QueryExecutionStateSucceeded:
+		case types.QueryExecutionStateSucceeded:
 			return nil
-		case athena.QueryExecutionStateQueued:
-		case athena.QueryExecutionStateRunning:
+		case types.QueryExecutionStateQueued:
+		case types.QueryExecutionStateRunning:
 		}
 
 		select {
 		case <-ctx.Done():
-			c.athena.StopQueryExecution(&athena.StopQueryExecutionInput{
+			c.athena.StopQueryExecution(ctx, &athena.StopQueryExecutionInput{
 				QueryExecutionId: aws.String(queryID),
 			})
 
@@ -229,7 +277,7 @@ func (c *conn) prepareContext(ctx context.Context, query string) (driver.Stmt, e
 	prepareKey := fmt.Sprintf("tmp_prepare_%v", strings.Replace(uuid.NewV4().String(), "-", "", -1))
 	newQuery := fmt.Sprintf("PREPARE %s FROM %s", prepareKey, query)
 
-	queryID, err := c.startQuery(newQuery)
+	queryID, err := c.startQuery(ctx, newQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -273,22 +321,16 @@ func (c *conn) Exec(query string, args []driver.Value) (driver.Result, error) {
 var _ driver.Queryer = (*conn)(nil)
 var _ driver.Execer = (*conn)(nil)
 
-// supported DDL statements by Athena
-// https://docs.aws.amazon.com/athena/latest/ug/language-reference.html
-var ddlQueryRegex = regexp.MustCompile(`(?i)^(ALTER|CREATE|DESCRIBE|DROP|MSCK|SHOW)`)
-
-func isDDLQuery(query string) bool {
-	return ddlQueryRegex.Match([]byte(query))
-}
-
-func isSelectQuery(query string) bool {
-	return regexp.MustCompile(`(?i)^SELECT`).Match([]byte(query))
-}
-
-func isCTASQuery(query string) bool {
-	return regexp.MustCompile(`(?i)^CREATE.+AS\s+SELECT`).Match([]byte(query))
-}
-
 func isCreatingCTASTable(isSelect bool, resultMode ResultMode) bool {
 	return isSelect && resultMode == ResultModeGzipDL
+}
+
+// isValidResultMode checks if the given result mode is valid
+func isValidResultMode(mode ResultMode) bool {
+	switch mode {
+	case ResultModeAPI, ResultModeDL, ResultModeGzipDL:
+		return true
+	default:
+		return false
+	}
 }

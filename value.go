@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/aws/aws-sdk-go/service/athena"
+	"github.com/aws/aws-sdk-go-v2/service/athena/types"
 )
 
 const (
@@ -18,7 +18,7 @@ const (
 
 const nullStringResultModeGzipDL string = "\\N"
 
-func convertRow(columns []*athena.ColumnInfo, in []*athena.Datum, ret []driver.Value) error {
+func convertRow(columns []types.ColumnInfo, in []types.Datum, ret []driver.Value) error {
 	for i, val := range in {
 		coerced, err := convertValue(*columns[i].Type, val.VarCharValue)
 		if err != nil {
@@ -31,7 +31,7 @@ func convertRow(columns []*athena.ColumnInfo, in []*athena.Datum, ret []driver.V
 	return nil
 }
 
-func convertRowFromTableInfo(columns []*athena.Column, in []string, ret []driver.Value) error {
+func convertRowFromTableInfo(columns []types.Column, in []string, ret []driver.Value) error {
 	for i, val := range in {
 		var coerced interface{}
 		var err error
@@ -51,7 +51,7 @@ func convertRowFromTableInfo(columns []*athena.Column, in []string, ret []driver
 	return nil
 }
 
-func convertRowFromCsv(columns []*athena.ColumnInfo, in []downloadField, ret []driver.Value) error {
+func convertRowFromCsv(columns []types.ColumnInfo, in []downloadField, ret []driver.Value) error {
 	for i, df := range in {
 		var coerced interface{}
 		var err error

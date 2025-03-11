@@ -60,6 +60,19 @@ Note
 - Detailed explanation is described [here](doc/result_mode.md).
 - [Usages of Result Mode](doc/result_mode.md#usages).
 
+## Performance
+
+Response time for fetching 1,000,000 records
+
+|package|response time|
+|--|--|
+|segmentio/go-athena|2m 33.4132205s|
+|speee/go-athena API mode|2m 26.475804292s|
+|speee/go-athena DL mode|20.719727417s|
+|speee/go-athena GZIP mode|17.661648209s|
+
+Detailed explanation is described [here](doc/result_mode.md#response-time-for-each-mode).
+
 ## Prepared Statements
 
 You can use [Athena Prepared Statements](https://docs.aws.amazon.com/athena/latest/ug/querying-with-prepared-statements.html).

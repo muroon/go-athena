@@ -21,7 +21,8 @@ type stmtAthena struct {
 
 func (s *stmtAthena) Close() error {
 	query := fmt.Sprintf("DEALLOCATE PREPARE %s", s.prepareKey)
-	_, err := s.conn.startQuery(query)
+	ctx := context.Background()
+	_, err := s.conn.startQuery(ctx, query)
 	return err
 }
 
@@ -130,7 +131,7 @@ func (s *stmtAthena) runQuery(ctx context.Context, query string) (driver.Rows, e
 		}
 	}
 
-	queryID, err := s.conn.startQuery(query)
+	queryID, err := s.conn.startQuery(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +145,7 @@ func (s *stmtAthena) runQuery(ctx context.Context, query string) (driver.Rows, e
 		QueryID:        queryID,
 		SkipHeader:     !isDDLQuery(query),
 		ResultMode:     s.resultMode,
-		Session:        s.conn.session,
+		Config:         s.conn.config,
 		OutputLocation: s.conn.OutputLocation,
 		Timeout:        timeout,
 		AfterDownload:  s.afterDownload,
