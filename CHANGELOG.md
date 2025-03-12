@@ -1,3 +1,8 @@
+# V1.0.4 (2021-03-11)
+
+- Upgrade go version in Dockerfile [#23](https://github.com/speee/go-athena/pull/23)
+- Upgrade to aws-sdk-go-v2 [#25](https://github.com/speee/go-athena/pull/25)
+
 # V1.0.3 (2021-10-15)
 
 - Add Prepared Statement [#20](https://github.com/speee/go-athena/pull/20)
