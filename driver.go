@@ -210,6 +210,8 @@ func configFromConnectionString(connStr string) (*Config, error) {
 		cfg.ResultMode = ResultModeDL
 	case modeValue == "gzip":
 		cfg.ResultMode = ResultModeGzipDL
+	case modeValue == "parquet":
+		cfg.ResultMode = ResultModeParquetDL
 	case modeValue != "" && modeValue != "api":
 		return nil, ErrInvalidResultMode
 	}

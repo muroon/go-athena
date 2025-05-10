@@ -12,4 +12,7 @@ const (
 
 	// ResultModeGzipDL ctas query and download gzip file Mode
 	ResultModeGzipDL ResultMode = 2
+
+	// ResultModeParquetDL ctas query and download parquet file Mode
+	ResultModeParquetDL ResultMode = 3
 )
