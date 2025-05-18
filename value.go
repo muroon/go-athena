@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/athena/types"
@@ -35,6 +36,12 @@ func convertRowFromTableInfo(columns []types.Column, in []string, ret []driver.V
 	for i, val := range in {
 		var coerced interface{}
 		var err error
+		
+		if i == 0 && strings.EqualFold(*columns[i].Name, "nullvalue") {
+			ret[i] = nil
+			continue
+		}
+		
 		if val == nullStringResultModeGzipDL {
 			var nullVal *string
 			coerced, err = convertValue(*columns[i].Type, nullVal)
