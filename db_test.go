@@ -96,6 +96,7 @@ func TestQuery(t *testing.T) {
 		ResultModeAPI,
 		ResultModeDL,
 		ResultModeGzipDL,
+		ResultModeParquetDL,
 	}
 
 	for _, resultMode := range resultModes {
@@ -107,6 +108,8 @@ func TestQuery(t *testing.T) {
 			ctx = SetDLMode(ctx)
 		case ResultModeGzipDL:
 			ctx = SetGzipDLMode(ctx)
+		case ResultModeParquetDL:
+			ctx = SetParquetDLMode(ctx)
 		}
 
 		rows := harness.mustQuery(ctx, "select * from %s", harness.table)
@@ -198,6 +201,7 @@ func TestPrepare(t *testing.T) {
 		ResultModeAPI,
 		ResultModeDL,
 		ResultModeGzipDL,
+		ResultModeParquetDL,
 	}
 
 	tests := []struct {
@@ -249,6 +253,8 @@ func TestPrepare(t *testing.T) {
 			ctx = SetDLMode(ctx)
 		case ResultModeGzipDL:
 			ctx = SetGzipDLMode(ctx)
+		case ResultModeParquetDL:
+			ctx = SetParquetDLMode(ctx)
 		}
 
 		for _, test := range tests {
@@ -294,6 +300,7 @@ func TestQueryForUsingWorkGroup(t *testing.T) {
 		ResultModeAPI,
 		ResultModeDL,
 		ResultModeGzipDL,
+		ResultModeParquetDL,
 	}
 
 	for _, resultMode := range resultModes {
@@ -309,6 +316,8 @@ func TestQueryForUsingWorkGroup(t *testing.T) {
 				ctx = SetDLMode(ctx)
 			case ResultModeGzipDL:
 				ctx = SetGzipDLMode(ctx)
+			case ResultModeParquetDL:
+				ctx = SetParquetDLMode(ctx)
 			}
 
 			rows := harness.mustQuery(ctx, "select count(*) as cnt from %s", harness.table)
@@ -333,6 +342,7 @@ func TestOpen(t *testing.T) {
 		ResultModeAPI,
 		ResultModeDL,
 		ResultModeGzipDL,
+		ResultModeParquetDL,
 	}
 
 	s3Buckes := []string{

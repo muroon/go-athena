@@ -135,7 +135,11 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 	if isCreatingCTASTable(isSelect, resultMode) {
 		// Create AS Select
 		ctasTable = fmt.Sprintf("tmp_ctas_%v", strings.Replace(uuid.NewV4().String(), "-", "", -1))
-		query = fmt.Sprintf("CREATE TABLE %s WITH (format='TEXTFILE') AS %s", ctasTable, query)
+		format := "TEXTFILE"
+		if resultMode == ResultModeParquetDL {
+			format = "PARQUET"
+		}
+		query = fmt.Sprintf("CREATE TABLE %s WITH (format='%s') AS %s", ctasTable, format, query)
 		afterDownload = c.dropCTASTable(ctx, ctasTable)
 	}
 
@@ -267,7 +271,11 @@ func (c *conn) prepareContext(ctx context.Context, query string) (driver.Stmt, e
 	if isCreatingCTASTable(isSelect, resultMode) {
 		// Create AS Select
 		ctasTable = fmt.Sprintf("tmp_ctas_%v", strings.Replace(uuid.NewV4().String(), "-", "", -1))
-		query = fmt.Sprintf("CREATE TABLE %s WITH (format='TEXTFILE') AS %s", ctasTable, query)
+		format := "TEXTFILE"
+		if resultMode == ResultModeParquetDL {
+			format = "PARQUET"
+		}
+		query = fmt.Sprintf("CREATE TABLE %s WITH (format='%s') AS %s", ctasTable, format, query)
 		afterDownload = c.dropCTASTable(ctx, ctasTable)
 	}
 
@@ -322,13 +330,13 @@ var _ driver.Queryer = (*conn)(nil)
 var _ driver.Execer = (*conn)(nil)
 
 func isCreatingCTASTable(isSelect bool, resultMode ResultMode) bool {
-	return isSelect && resultMode == ResultModeGzipDL
+	return isSelect && (resultMode == ResultModeGzipDL || resultMode == ResultModeParquetDL)
 }
 
 // isValidResultMode checks if the given result mode is valid
 func isValidResultMode(mode ResultMode) bool {
 	switch mode {
-	case ResultModeAPI, ResultModeDL, ResultModeGzipDL:
+	case ResultModeAPI, ResultModeDL, ResultModeGzipDL, ResultModeParquetDL:
 		return true
 	default:
 		return false
