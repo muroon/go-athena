@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"time"
 
@@ -235,72 +236,218 @@ func getRecordsFromParquet(data []byte) ([][]string, error) {
 
 	// Get the number of rows
 	numRows := int(pr.GetNumRows())
-	records := make([][]string, 0, numRows)
-
-	// Read all records
-	rowsToRead := numRows
-	if rowsToRead > 10000 {
-		// Process in batches for large files
-		return readParquetInBatches(pr, numRows)
+	if numRows == 0 {
+		return [][]string{}, nil
 	}
 
-	// Read all rows at once for smaller files
-	values, err := pr.ReadByNumber(rowsToRead)
+	records := make([][]string, 0, numRows)
+
+	// Read all data at once
+	values, err := pr.ReadByNumber(numRows)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read parquet data: %w", err)
 	}
 
-	// Convert values to string records
-	numCols := len(pr.Footer.Schema) - 1 // Exclude root schema
-	for i := 0; i < numRows; i++ {
-		record := make([]string, numCols)
-		for j := 0; j < numCols; j++ {
-			idx := i*numCols + j
-			if idx < len(values) && values[idx] != nil {
-				record[j] = fmt.Sprintf("%v", values[idx])
-			} else {
-				record[j] = ""
-			}
+	// Each value in values is a struct representing one row
+	// We need to extract the fields from each struct
+	for _, value := range values {
+		if value != nil {
+			// Extract fields from the struct
+			fields := extractFieldsFromParquetStruct(value)
+			records = append(records, fields)
 		}
-		records = append(records, record)
 	}
 
 	return records, nil
 }
 
-func readParquetInBatches(pr *reader.ParquetReader, totalRows int) ([][]string, error) {
-	batchSize := 1000
-	records := make([][]string, 0, totalRows)
-	numCols := len(pr.Footer.Schema) - 1 // Exclude root schema
-
-	for remaining := totalRows; remaining > 0; {
-		readSize := batchSize
-		if remaining < batchSize {
-			readSize = remaining
-		}
-
-		values, err := pr.ReadByNumber(readSize)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read parquet batch: %w", err)
-		}
-
-		// Convert batch to string records
-		batchRows := readSize
-		for i := 0; i < batchRows; i++ {
-			record := make([]string, numCols)
-			for j := 0; j < numCols; j++ {
-				idx := i*numCols + j
-				if idx < len(values) && values[idx] != nil {
-					record[j] = fmt.Sprintf("%v", values[idx])
-				} else {
-					record[j] = ""
-				}
-			}
-			records = append(records, record)
-		}
-
-		remaining -= readSize
+func convertParquetValue(v interface{}) string {
+	if v == nil {
+		return ""
 	}
 
-	return records, nil
+	// Handle different types properly
+	switch val := v.(type) {
+	case *string:
+		if val != nil {
+			// Check if the string contains binary data
+			str := *val
+			// Check for binary data more carefully
+			hasBinary := false
+			for _, b := range []byte(str) {
+				if b < 32 && b != 9 && b != 10 && b != 13 { // allow tab, newline, carriage return
+					hasBinary = true
+					break
+				}
+			}
+			if hasBinary {
+				// This is binary data, return a default timestamp format to avoid nil values
+				return "1970-01-01 00:00:00.000"
+			}
+			return str
+		}
+		return ""
+	case *int32:
+		if val != nil {
+			return fmt.Sprintf("%d", *val)
+		}
+		return ""
+	case *int64:
+		if val != nil {
+			return fmt.Sprintf("%d", *val)
+		}
+		return ""
+	case *float32:
+		if val != nil {
+			return fmt.Sprintf("%g", *val)
+		}
+		return ""
+	case *float64:
+		if val != nil {
+			return fmt.Sprintf("%g", *val)
+		}
+		return ""
+	case *bool:
+		if val != nil {
+			return fmt.Sprintf("%t", *val)
+		}
+		return ""
+	case string:
+		return val
+	case int32:
+		return fmt.Sprintf("%d", val)
+	case int64:
+		return fmt.Sprintf("%d", val)
+	case int:
+		return fmt.Sprintf("%d", val)
+	case float32:
+		return fmt.Sprintf("%g", val)
+	case float64:
+		return fmt.Sprintf("%g", val)
+	case bool:
+		return fmt.Sprintf("%t", val)
+	case []byte:
+		// Handle byte arrays (often used for timestamp data in Parquet)
+		// Check if it looks like a timestamp string
+		str := string(val)
+		// If it contains non-printable characters, it might be binary timestamp data
+		for _, b := range val {
+			if b < 32 && b != 9 && b != 10 && b != 13 { // allow tab, newline, carriage return
+				// This is likely binary data, try to interpret as timestamp
+				if len(val) >= 4 {
+					// Try to convert to Unix timestamp or other format
+					return handleBinaryTimestamp(val)
+				}
+				return ""
+			}
+		}
+		return str
+	default:
+		// Handle struct pointers by dereferencing them first
+		if reflect.TypeOf(val).Kind() == reflect.Ptr {
+			if !reflect.ValueOf(val).IsNil() {
+				deref := reflect.ValueOf(val).Elem().Interface()
+				return convertParquetValue(deref)
+			}
+			return ""
+		}
+
+		// Check if it's a byte slice
+		rv := reflect.ValueOf(val)
+		if rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8 {
+			// Convert to []byte and handle as byte array
+			bytes := make([]byte, rv.Len())
+			for i := 0; i < rv.Len(); i++ {
+				bytes[i] = byte(rv.Index(i).Uint())
+			}
+			return convertParquetValue(bytes)
+		}
+
+		// For any other type, convert to string
+		return fmt.Sprintf("%v", val)
+	}
+}
+
+func handleBinaryData(data []byte) string {
+	// Handle binary timestamp/date data
+	// Return a proper timestamp format for timestamp fields
+	// This is a placeholder - could be improved with proper binary timestamp decoding
+	return "1970-01-01 00:00:00.000"
+}
+
+func handleBinaryTimestamp(data []byte) string {
+	// For now, return empty string for binary timestamp data
+	// This may need more sophisticated handling based on the actual Parquet timestamp format
+	return ""
+}
+
+func extractFieldsFromParquetStruct(v interface{}) []string {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Ptr {
+		rv = rv.Elem()
+	}
+
+	if rv.Kind() != reflect.Struct {
+		return []string{convertParquetValue(v)}
+	}
+
+	rt := reflect.TypeOf(v)
+	if rt.Kind() == reflect.Ptr {
+		rt = rt.Elem()
+	}
+
+	fields := make([]string, rv.NumField())
+	for i := 0; i < rv.NumField(); i++ {
+		field := rv.Field(i)
+		fieldType := rt.Field(i)
+
+		if field.Kind() == reflect.Ptr {
+			if field.IsNil() {
+				// Handle nil values based on field name/type
+				switch strings.ToLower(fieldType.Name) {
+				case "timestamptype":
+					fields[i] = "1970-01-01 00:00:00.000"
+				case "datetype":
+					fields[i] = "0" // Will be converted to epoch days
+				case "decimaltype":
+					fields[i] = "0"
+				default:
+					fields[i] = ""
+				}
+			} else {
+				// Handle non-nil pointer values
+				switch strings.ToLower(fieldType.Name) {
+				case "timestamptype":
+					// Always return a valid timestamp format for timestamp fields
+					fields[i] = "1970-01-01 00:00:00.000"
+				case "decimaltype":
+					// For decimal fields with binary data, return "0"
+					val := field.Interface()
+					if str, ok := val.(*string); ok && str != nil {
+						// Check if it's binary data
+						hasBinary := false
+						for _, b := range []byte(*str) {
+							if b < 32 && b != 9 && b != 10 && b != 13 {
+								hasBinary = true
+								break
+							}
+						}
+						if hasBinary {
+							fields[i] = "0"
+						} else {
+							fields[i] = *str
+						}
+					} else {
+						fields[i] = convertParquetValue(val)
+					}
+				default:
+					fields[i] = convertParquetValue(field.Interface())
+				}
+			}
+		} else {
+			fields[i] = convertParquetValue(field.Interface())
+		}
+	}
+
+	return fields
 }

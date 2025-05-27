@@ -81,6 +81,12 @@ func convertValue(athenaType string, rawValue *string) (interface{}, error) {
 	}
 
 	val := *rawValue
+
+	// Handle empty strings for all types
+	if val == "" {
+		return nil, nil
+	}
+
 	switch athenaType {
 	case "smallint":
 		return strconv.ParseInt(val, 10, 16)
@@ -107,6 +113,16 @@ func convertValue(athenaType string, rawValue *string) (interface{}, error) {
 	case "timestamp with time zone":
 		return time.Parse(TimestampWithTimeZoneLayout, val)
 	case "date":
+		// Try to parse as date string first
+		if t, err := time.Parse(DateLayout, val); err == nil {
+			return t, nil
+		}
+		// If that fails, try to parse as epoch days (common in Parquet)
+		if days, err := strconv.ParseInt(val, 10, 64); err == nil {
+			// Convert days since Unix epoch to date
+			epochStart := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+			return epochStart.AddDate(0, 0, int(days)), nil
+		}
 		return time.Parse(DateLayout, val)
 	default:
 		panic(fmt.Errorf("unknown type `%s` with value %s", athenaType, val))
