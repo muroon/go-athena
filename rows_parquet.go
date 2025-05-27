@@ -8,12 +8,13 @@ import (
 	"io"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/athena"
 	"github.com/aws/aws-sdk-go-v2/service/athena/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/xitongsys/parquet-go-source/buffer"
+	"github.com/xitongsys/parquet-go/reader"
 )
 
 type rowsParquetDL struct {
@@ -91,6 +92,7 @@ func (r *rowsParquetDL) downloadParquetData(ctx context.Context, cfg aws.Config,
 
 	s3Client := s3.NewFromConfig(cfg)
 
+	// Download manifest file to get list of parquet files
 	resp, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucketName),
 		Key:    aws.String(fmt.Sprintf("tables/%s-manifest.csv", r.queryID)),
@@ -111,6 +113,7 @@ func (r *rowsParquetDL) downloadParquetData(ctx context.Context, cfg aws.Config,
 		return err
 	}
 
+	// Download and process each parquet file
 	for _, objectKey := range objectKeys {
 		resp, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
 			Bucket: aws.String(bucketName),
@@ -126,7 +129,7 @@ func (r *rowsParquetDL) downloadParquetData(ctx context.Context, cfg aws.Config,
 			return err
 		}
 
-		datas, err := getRecordsFromParquet(strings.NewReader(string(data)))
+		datas, err := getRecordsFromParquet(data)
 		if err != nil {
 			return err
 		}
@@ -218,34 +221,85 @@ func getObjectKeysForParquet(reader io.Reader, start int) ([]string, error) {
 	return keys, nil
 }
 
-func getRecordsFromParquet(reader io.Reader) ([][]string, error) {
-	records := make([][]string, 0)
+func getRecordsFromParquet(data []byte) ([][]string, error) {
+	// Create a buffer source from the parquet data
+	bufferSource := buffer.NewBufferFile()
+	bufferSource.Write(data)
 
-	scanner := bufio.NewScanner(reader)
+	// Create parquet reader
+	pr, err := reader.NewParquetReader(bufferSource, nil, 4)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create parquet reader: %w", err)
+	}
+	defer pr.ReadStop()
 
-	for scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return nil, err
-		}
-		b := scanner.Bytes()
-		field := ""
-		record := make([]string, 0)
-		for {
-			r, width := utf8.DecodeRune(b)
-			if r == '\001' {
-				record = append(record, field)
-				field = ""
+	// Get the number of rows
+	numRows := int(pr.GetNumRows())
+	records := make([][]string, 0, numRows)
+
+	// Read all records
+	rowsToRead := numRows
+	if rowsToRead > 10000 {
+		// Process in batches for large files
+		return readParquetInBatches(pr, numRows)
+	}
+
+	// Read all rows at once for smaller files
+	values, err := pr.ReadByNumber(rowsToRead)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read parquet data: %w", err)
+	}
+
+	// Convert values to string records
+	numCols := len(pr.Footer.Schema) - 1 // Exclude root schema
+	for i := 0; i < numRows; i++ {
+		record := make([]string, numCols)
+		for j := 0; j < numCols; j++ {
+			idx := i*numCols + j
+			if idx < len(values) && values[idx] != nil {
+				record[j] = fmt.Sprintf("%v", values[idx])
 			} else {
-				field += string(r)
+				record[j] = ""
 			}
-			if width >= len(b) {
-				record = append(record, field)
-				break
-			}
-			b = b[width:]
+		}
+		records = append(records, record)
+	}
+
+	return records, nil
+}
+
+func readParquetInBatches(pr *reader.ParquetReader, totalRows int) ([][]string, error) {
+	batchSize := 1000
+	records := make([][]string, 0, totalRows)
+	numCols := len(pr.Footer.Schema) - 1 // Exclude root schema
+
+	for remaining := totalRows; remaining > 0; {
+		readSize := batchSize
+		if remaining < batchSize {
+			readSize = remaining
 		}
 
-		records = append(records, record)
+		values, err := pr.ReadByNumber(readSize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read parquet batch: %w", err)
+		}
+
+		// Convert batch to string records
+		batchRows := readSize
+		for i := 0; i < batchRows; i++ {
+			record := make([]string, numCols)
+			for j := 0; j < numCols; j++ {
+				idx := i*numCols + j
+				if idx < len(values) && values[idx] != nil {
+					record[j] = fmt.Sprintf("%v", values[idx])
+				} else {
+					record[j] = ""
+				}
+			}
+			records = append(records, record)
+		}
+
+		remaining -= readSize
 	}
 
 	return records, nil
