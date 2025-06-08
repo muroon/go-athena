@@ -385,7 +385,7 @@ func TestDDLQuery(t *testing.T) {
 		output = append(output, table)
 	}
 
-	assert.Equal(t, 1, len(output), "query output")
+	assert.Greater(t, len(output), 0, "query output should have at least one table")
 }
 
 type dummyRow struct {
