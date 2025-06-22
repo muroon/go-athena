@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"time"
 
+	"database/sql"
+
 	"github.com/aws/aws-sdk-go-v2/service/athena/types"
 )
 
@@ -17,6 +19,7 @@ const (
 )
 
 const nullStringResultModeGzipDL string = "\\N"
+const nullStringResultModeParquetDL string = "\\N"
 
 func convertRow(columns []types.ColumnInfo, in []types.Datum, ret []driver.Value) error {
 	for i, val := range in {
@@ -35,7 +38,7 @@ func convertRowFromTableInfo(columns []types.Column, in []string, ret []driver.V
 	for i, val := range in {
 		var coerced interface{}
 		var err error
-		if val == nullStringResultModeGzipDL {
+		if val == nullStringResultModeGzipDL || val == nullStringResultModeParquetDL {
 			var nullVal *string
 			coerced, err = convertValue(*columns[i].Type, nullVal)
 		} else {
@@ -72,8 +75,21 @@ func convertRowFromCsv(columns []types.ColumnInfo, in []downloadField, ret []dri
 }
 
 func convertValue(athenaType string, rawValue *string) (interface{}, error) {
-	if rawValue == nil {
-		return nil, nil
+	if rawValue == nil || *rawValue == nullStringResultModeGzipDL || *rawValue == nullStringResultModeParquetDL {
+		switch athenaType {
+		case "struct", "string", "varchar":
+			return sql.NullString{Valid: false}, nil
+		case "smallint", "integer", "int", "bigint":
+			return sql.NullInt64{Valid: false}, nil
+		case "boolean":
+			return sql.NullBool{Valid: false}, nil
+		case "float", "double", "decimal":
+			return sql.NullFloat64{Valid: false}, nil
+		case "timestamp", "timestamp with time zone", "date":
+			return time.Time{}, nil
+		default:
+			return nil, nil
+		}
 	}
 
 	if len(athenaType) > 7 && athenaType[:7] == "decimal" {
@@ -82,33 +98,31 @@ func convertValue(athenaType string, rawValue *string) (interface{}, error) {
 
 	val := *rawValue
 	switch athenaType {
-	case "smallint":
-		return strconv.ParseInt(val, 10, 16)
-	case "integer", "int":
-		return strconv.ParseInt(val, 10, 32)
-	case "bigint":
-		return strconv.ParseInt(val, 10, 64)
-	case "boolean":
-		switch val {
-		case "true":
-			return true, nil
-		case "false":
-			return false, nil
+	case "struct", "string", "varchar":
+		return sql.NullString{String: val, Valid: true}, nil
+	case "smallint", "integer", "int", "bigint":
+		i, err := strconv.ParseInt(val, 10, 64)
+		if err != nil {
+			return nil, err
 		}
-		return nil, fmt.Errorf("cannot parse '%s' as boolean", val)
-	case "float":
-		return strconv.ParseFloat(val, 32)
-	case "double", "decimal":
-		return strconv.ParseFloat(val, 64)
-	case "varchar", "string":
-		return val, nil
-	case "timestamp":
+		return sql.NullInt64{Int64: i, Valid: true}, nil
+	case "boolean":
+		b, err := strconv.ParseBool(val)
+		if err != nil {
+			return nil, err
+		}
+		return sql.NullBool{Bool: b, Valid: true}, nil
+	case "float", "double", "decimal":
+		f, err := strconv.ParseFloat(val, 64)
+		if err != nil {
+			return nil, err
+		}
+		return sql.NullFloat64{Float64: f, Valid: true}, nil
+	case "timestamp", "timestamp with time zone":
 		return time.Parse(TimestampLayout, val)
-	case "timestamp with time zone":
-		return time.Parse(TimestampWithTimeZoneLayout, val)
 	case "date":
 		return time.Parse(DateLayout, val)
 	default:
-		panic(fmt.Errorf("unknown type `%s` with value %s", athenaType, val))
+		return nil, fmt.Errorf("unsupported type: %s", athenaType)
 	}
 }

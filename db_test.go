@@ -50,14 +50,14 @@ func TestQuery(t *testing.T) {
 	harness := setup(t, false)
 	defer harness.teardown()
 
-	expected := []dummyRow{
+	data := []dummyRow{
 		{
 			SmallintType:  1,
 			IntType:       2,
 			BigintType:    3,
 			BooleanType:   true,
-			FloatType:     3.14159,
-			DoubleType:    1.32112345,
+			FloatType:     3.1415928,
+			DoubleType:    3141592653589.793,
 			StringType:    "some string",
 			TimestampType: athenaTimestamp(time.Date(2006, 1, 2, 3, 4, 11, 0, time.UTC)),
 			DateType:      athenaDate(time.Date(2006, 1, 2, 0, 0, 0, 0, time.UTC)),
@@ -68,8 +68,8 @@ func TestQuery(t *testing.T) {
 			IntType:       8,
 			BigintType:    0,
 			BooleanType:   false,
-			FloatType:     3.14159,
-			DoubleType:    1.235,
+			FloatType:     3.1415930,
+			DoubleType:    3141592653589.79,
 			StringType:    "another string",
 			TimestampType: athenaTimestamp(time.Date(2017, 12, 3, 1, 11, 12, 0, time.UTC)),
 			DateType:      athenaDate(time.Date(2017, 12, 3, 0, 0, 0, 0, time.UTC)),
@@ -80,22 +80,21 @@ func TestQuery(t *testing.T) {
 			IntType:       8,
 			BigintType:    0,
 			BooleanType:   false,
-			DoubleType:    1.235,
 			FloatType:     3.14159,
-			StringType:    "another string",
+			DoubleType:    3141592653589.8,
+			StringType:    "123.456",
 			TimestampType: athenaTimestamp(time.Date(2017, 12, 3, 20, 11, 12, 0, time.UTC)),
 			DateType:      athenaDate(time.Date(2017, 12, 3, 0, 0, 0, 0, time.UTC)),
 			DecimalType:   0.48,
 		},
 	}
-	expectedTypeNames := []string{"varchar", "smallint", "integer", "bigint", "boolean", "float", "double", "varchar", "timestamp", "date", "decimal"}
-	expectedTypeNameGzipDLs := []string{"string", "smallint", "int", "bigint", "boolean", "float", "double", "string", "timestamp", "date", "decimal(11,5)"}
-	harness.uploadData(expected)
+	harness.uploadData(data)
 
 	resultModes := []ResultMode{
 		ResultModeAPI,
 		ResultModeDL,
 		ResultModeGzipDL,
+		ResultModeParquetDL,
 	}
 
 	for _, resultMode := range resultModes {
@@ -107,6 +106,8 @@ func TestQuery(t *testing.T) {
 			ctx = SetDLMode(ctx)
 		case ResultModeGzipDL:
 			ctx = SetGzipDLMode(ctx)
+		case ResultModeParquetDL:
+			ctx = SetParquetDLMode(ctx)
 		}
 
 		rows := harness.mustQuery(ctx, "select * from %s", harness.table)
@@ -117,7 +118,6 @@ func TestQuery(t *testing.T) {
 			var row dummyRow
 			require.NoError(t, rows.Scan(
 				&row.NullValue,
-
 				&row.SmallintType,
 				&row.IntType,
 				&row.BigintType,
@@ -130,18 +130,37 @@ func TestQuery(t *testing.T) {
 				&row.DecimalType,
 			))
 
-			assert.Equal(t, expected[index], row, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
+			if data[index].NullValue.Valid {
+				assert.True(t, row.NullValue.Valid)
+				assert.Equal(t, data[index].NullValue.String, row.NullValue.String)
+			} else {
+				assert.False(t, row.NullValue.Valid)
+			}
+
+			assert.Equal(t, data[index].SmallintType, row.SmallintType)
+			assert.Equal(t, data[index].IntType, row.IntType)
+			assert.Equal(t, data[index].BigintType, row.BigintType)
+			assert.Equal(t, data[index].BooleanType, row.BooleanType)
+			assert.Equal(t, data[index].FloatType, row.FloatType)
+			assert.Equal(t, data[index].DoubleType, row.DoubleType)
+			assert.Equal(t, data[index].StringType, row.StringType)
+			assert.Equal(t, data[index].TimestampType, row.TimestampType)
+			assert.Equal(t, data[index].DateType, row.DateType)
+			assert.Equal(t, data[index].DecimalType, row.DecimalType)
 
 			types, err := rows.ColumnTypes()
 			assert.NoError(t, err, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
 
-			etns := expectedTypeNames
-			if resultMode == ResultModeGzipDL {
-				etns = expectedTypeNameGzipDLs
+			var typeNames []string
+			if resultMode == ResultModeGzipDL || resultMode == ResultModeParquetDL {
+				typeNames = []string{"string", "smallint", "int", "bigint", "boolean", "float", "double", "string", "timestamp", "date", "decimal(11,5)"}
+			} else {
+				typeNames = []string{"varchar", "smallint", "integer", "bigint", "boolean", "float", "double", "varchar", "timestamp", "date", "decimal"}
 			}
+
 			for i, colType := range types {
 				typeName := colType.DatabaseTypeName()
-				assert.Equal(t, etns[i], typeName, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
+				assert.Equal(t, typeNames[i], typeName, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
 			}
 		}
 
@@ -198,6 +217,7 @@ func TestPrepare(t *testing.T) {
 		ResultModeAPI,
 		ResultModeDL,
 		ResultModeGzipDL,
+		ResultModeParquetDL,
 	}
 
 	tests := []struct {
@@ -249,6 +269,8 @@ func TestPrepare(t *testing.T) {
 			ctx = SetDLMode(ctx)
 		case ResultModeGzipDL:
 			ctx = SetGzipDLMode(ctx)
+		case ResultModeParquetDL:
+			ctx = SetParquetDLMode(ctx)
 		}
 
 		for _, test := range tests {
@@ -281,7 +303,24 @@ func TestPrepare(t *testing.T) {
 						&got.NullValue, &got.SmallintType, &got.IntType, &got.BigintType, &got.BooleanType, &got.FloatType, &got.DoubleType, &got.StringType, &got.TimestampType, &got.DateType, &got.DecimalType,
 					)
 					require.NoError(t, err)
-					assert.Equal(t, test.want, got, fmt.Sprintf("resultMode:%v, prepareIntType error", resultMode))
+
+					if test.want.NullValue.Valid {
+						assert.True(t, got.NullValue.Valid)
+						assert.Equal(t, test.want.NullValue.String, got.NullValue.String)
+					} else {
+						assert.False(t, got.NullValue.Valid)
+					}
+
+					assert.Equal(t, test.want.SmallintType, got.SmallintType)
+					assert.Equal(t, test.want.IntType, got.IntType)
+					assert.Equal(t, test.want.BigintType, got.BigintType)
+					assert.Equal(t, test.want.BooleanType, got.BooleanType)
+					assert.Equal(t, test.want.FloatType, got.FloatType)
+					assert.Equal(t, test.want.DoubleType, got.DoubleType)
+					assert.Equal(t, test.want.StringType, got.StringType)
+					assert.Equal(t, test.want.TimestampType, got.TimestampType)
+					assert.Equal(t, test.want.DateType, got.DateType)
+					assert.Equal(t, test.want.DecimalType, got.DecimalType)
 				}
 				assert.Equal(t, 1, length)
 			})
@@ -294,6 +333,7 @@ func TestQueryForUsingWorkGroup(t *testing.T) {
 		ResultModeAPI,
 		ResultModeDL,
 		ResultModeGzipDL,
+		ResultModeParquetDL,
 	}
 
 	for _, resultMode := range resultModes {
@@ -309,14 +349,17 @@ func TestQueryForUsingWorkGroup(t *testing.T) {
 				ctx = SetDLMode(ctx)
 			case ResultModeGzipDL:
 				ctx = SetGzipDLMode(ctx)
+			case ResultModeParquetDL:
+				ctx = SetParquetDLMode(ctx)
 			}
 
 			rows := harness.mustQuery(ctx, "select count(*) as cnt from %s", harness.table)
 			defer rows.Close()
-			var cnt int
+			var cnt sql.NullInt64
 			for rows.Next() {
 				require.NoError(t, rows.Scan(&cnt))
-				assert.Equal(t, 0, cnt)
+				assert.True(t, cnt.Valid)
+				assert.Equal(t, int64(0), cnt.Int64)
 			}
 		})
 	}
@@ -333,6 +376,7 @@ func TestOpen(t *testing.T) {
 		ResultModeAPI,
 		ResultModeDL,
 		ResultModeGzipDL,
+		ResultModeParquetDL,
 	}
 
 	s3Buckes := []string{
@@ -358,8 +402,8 @@ func TestOpen(t *testing.T) {
 
 			ctx := context.Background()
 			_, err = db.QueryContext(ctx, "SELECT 1")
-			if resultMode == ResultModeGzipDL {
-				require.Error(t, err, "Query IN Gzip DL Mode")
+			if resultMode == ResultModeGzipDL || resultMode == ResultModeParquetDL {
+				require.Error(t, err, fmt.Sprintf("Query IN %v Mode", resultMode))
 			} else {
 				require.NoError(t, err, fmt.Sprintf("Query IN resultMode:%v", resultMode))
 			}
@@ -377,19 +421,21 @@ func TestDDLQuery(t *testing.T) {
 
 	output := make([]string, 0)
 	for rows.Next() {
-		var table string
+		var table sql.NullString
 
 		err := rows.Scan(&table)
 		assert.NoError(t, err, "rows.Scan()")
 
-		output = append(output, table)
+		if table.Valid {
+			output = append(output, table.String)
+		}
 	}
 
 	assert.Greater(t, len(output), 0, "query output should have at least one table")
 }
 
 type dummyRow struct {
-	NullValue     *struct{}       `json:"nullValue"`
+	NullValue     sql.NullString  `json:"nullValue"`
 	SmallintType  int             `json:"smallintType"`
 	IntType       int             `json:"intType"`
 	BigintType    int             `json:"bigintType"`
