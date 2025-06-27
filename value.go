@@ -16,7 +16,10 @@ const (
 	DateLayout                  = "2006-01-02"
 )
 
-const nullStringResultModeGzipDL string = "\\N"
+const (
+	nullStringResultModeGzipDL string = "\\N"
+	nullStringResultModeParquet string = "__HIVE_DEFAULT_PARTITION__"
+)
 
 func convertRow(columns []types.ColumnInfo, in []types.Datum, ret []driver.Value) error {
 	for i, val := range in {
@@ -35,7 +38,7 @@ func convertRowFromTableInfo(columns []types.Column, in []string, ret []driver.V
 	for i, val := range in {
 		var coerced interface{}
 		var err error
-		if val == nullStringResultModeGzipDL {
+		if val == nullStringResultModeGzipDL || val == nullStringResultModeParquet || val == "" {
 			var nullVal *string
 			coerced, err = convertValue(*columns[i].Type, nullVal)
 		} else {

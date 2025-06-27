@@ -40,6 +40,8 @@ func newRows(cfg rowsConfig) (driver.Rows, error) {
 		r, err = newRowsDL(cfg)
 	case ResultModeGzipDL:
 		r, err = newRowsGzipDL(cfg)
+	case ResultModeParquet:
+		r, err = newRowsParquet(cfg)
 	default:
 		r, err = newRowsAPI(cfg)
 	}

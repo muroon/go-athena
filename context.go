@@ -54,6 +54,11 @@ func SetGzipDLMode(ctx context.Context) context.Context {
 	return SetResultMode(ctx, ResultModeGzipDL)
 }
 
+// SetParquetMode sets ParquetMode to ResultMode in context
+func SetParquetMode(ctx context.Context) context.Context {
+	return SetResultMode(ctx, ResultModeParquet)
+}
+
 func getResultMode(ctx context.Context) (ResultMode, bool) {
 	return contextValue[ResultMode](ctx, resultModeKey)
 }

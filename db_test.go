@@ -96,6 +96,7 @@ func TestQuery(t *testing.T) {
 		ResultModeAPI,
 		ResultModeDL,
 		ResultModeGzipDL,
+		ResultModeParquet,
 	}
 
 	for _, resultMode := range resultModes {
@@ -108,6 +109,8 @@ func TestQuery(t *testing.T) {
 				ctx = SetDLMode(ctx)
 			case ResultModeGzipDL:
 				ctx = SetGzipDLMode(ctx)
+			case ResultModeParquet:
+				ctx = SetParquetMode(ctx)
 			}
 
 			rows := harness.mustQuery(ctx, "select * from %s", harness.table)
@@ -137,7 +140,7 @@ func TestQuery(t *testing.T) {
 				assert.NoError(t, err, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
 
 				etns := expectedTypeNames
-				if resultMode == ResultModeGzipDL {
+				if resultMode == ResultModeGzipDL || resultMode == ResultModeParquet {
 					etns = expectedTypeNameGzipDLs
 				}
 				for i, colType := range types {
@@ -200,6 +203,7 @@ func TestPrepare(t *testing.T) {
 		ResultModeAPI,
 		ResultModeDL,
 		ResultModeGzipDL,
+		ResultModeParquet,
 	}
 
 	tests := []struct {
@@ -251,6 +255,8 @@ func TestPrepare(t *testing.T) {
 			ctx = SetDLMode(ctx)
 		case ResultModeGzipDL:
 			ctx = SetGzipDLMode(ctx)
+		case ResultModeParquet:
+			ctx = SetParquetMode(ctx)
 		}
 
 		for _, test := range tests {
@@ -296,6 +302,7 @@ func TestQueryForUsingWorkGroup(t *testing.T) {
 		ResultModeAPI,
 		ResultModeDL,
 		ResultModeGzipDL,
+		ResultModeParquet,
 	}
 
 	for _, resultMode := range resultModes {
@@ -311,6 +318,8 @@ func TestQueryForUsingWorkGroup(t *testing.T) {
 				ctx = SetDLMode(ctx)
 			case ResultModeGzipDL:
 				ctx = SetGzipDLMode(ctx)
+			case ResultModeParquet:
+				ctx = SetParquetMode(ctx)
 			}
 
 			rows := harness.mustQuery(ctx, "select count(*) as cnt from %s", harness.table)
@@ -335,6 +344,7 @@ func TestOpen(t *testing.T) {
 		ResultModeAPI,
 		ResultModeDL,
 		ResultModeGzipDL,
+		ResultModeParquet,
 	}
 
 	s3Buckes := []string{
@@ -360,8 +370,8 @@ func TestOpen(t *testing.T) {
 
 			ctx := context.Background()
 			_, err = db.QueryContext(ctx, "SELECT 1")
-			if resultMode == ResultModeGzipDL {
-				require.Error(t, err, "Query IN Gzip DL Mode")
+			if resultMode == ResultModeGzipDL || resultMode == ResultModeParquet {
+				require.Error(t, err, "Query IN CTAS-based Mode")
 			} else {
 				require.NoError(t, err, fmt.Sprintf("Query IN resultMode:%v", resultMode))
 			}
