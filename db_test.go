@@ -99,54 +99,56 @@ func TestQuery(t *testing.T) {
 	}
 
 	for _, resultMode := range resultModes {
-		ctx := context.Background()
-		switch resultMode {
-		case ResultModeAPI:
-			ctx = SetAPIMode(ctx)
-		case ResultModeDL:
-			ctx = SetDLMode(ctx)
-		case ResultModeGzipDL:
-			ctx = SetGzipDLMode(ctx)
-		}
-
-		rows := harness.mustQuery(ctx, "select * from %s", harness.table)
-		index := -1
-		for rows.Next() {
-			index++
-
-			var row dummyRow
-			require.NoError(t, rows.Scan(
-				&row.NullValue,
-
-				&row.SmallintType,
-				&row.IntType,
-				&row.BigintType,
-				&row.BooleanType,
-				&row.FloatType,
-				&row.DoubleType,
-				&row.StringType,
-				&row.TimestampType,
-				&row.DateType,
-				&row.DecimalType,
-			))
-
-			assert.Equal(t, expected[index], row, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
-
-			types, err := rows.ColumnTypes()
-			assert.NoError(t, err, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
-
-			etns := expectedTypeNames
-			if resultMode == ResultModeGzipDL {
-				etns = expectedTypeNameGzipDLs
+		t.Run(fmt.Sprintf("ResultMode:%v", resultMode), func(t *testing.T) {
+			ctx := context.Background()
+			switch resultMode {
+			case ResultModeAPI:
+				ctx = SetAPIMode(ctx)
+			case ResultModeDL:
+				ctx = SetDLMode(ctx)
+			case ResultModeGzipDL:
+				ctx = SetGzipDLMode(ctx)
 			}
-			for i, colType := range types {
-				typeName := colType.DatabaseTypeName()
-				assert.Equal(t, etns[i], typeName, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
-			}
-		}
 
-		require.NoError(t, rows.Err(), fmt.Sprintf("rows.Err(). resultMode:%v", resultMode))
-		require.Equal(t, 3, index+1, fmt.Sprintf("row count. resultMode:%v", resultMode))
+			rows := harness.mustQuery(ctx, "select * from %s", harness.table)
+			index := -1
+			for rows.Next() {
+				index++
+
+				var row dummyRow
+				require.NoError(t, rows.Scan(
+					&row.NullValue,
+
+					&row.SmallintType,
+					&row.IntType,
+					&row.BigintType,
+					&row.BooleanType,
+					&row.FloatType,
+					&row.DoubleType,
+					&row.StringType,
+					&row.TimestampType,
+					&row.DateType,
+					&row.DecimalType,
+				))
+
+				assert.Equal(t, expected[index], row, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
+
+				types, err := rows.ColumnTypes()
+				assert.NoError(t, err, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
+
+				etns := expectedTypeNames
+				if resultMode == ResultModeGzipDL {
+					etns = expectedTypeNameGzipDLs
+				}
+				for i, colType := range types {
+					typeName := colType.DatabaseTypeName()
+					assert.Equal(t, etns[i], typeName, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
+				}
+			}
+
+			require.NoError(t, rows.Err(), fmt.Sprintf("rows.Err(). resultMode:%v", resultMode))
+			require.Equal(t, 3, index+1, fmt.Sprintf("row count. resultMode:%v", resultMode))
+		})
 	}
 }
 
