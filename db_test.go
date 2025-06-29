@@ -140,8 +140,11 @@ func TestQuery(t *testing.T) {
 				assert.NoError(t, err, fmt.Sprintf("resultMode:%v, index:%d", resultMode, index))
 
 				etns := expectedTypeNames
-				if resultMode == ResultModeGzipDL || resultMode == ResultModeParquet {
+				if resultMode == ResultModeGzipDL {
 					etns = expectedTypeNameGzipDLs
+				} else if resultMode == ResultModeParquet {
+					// Parquet mode uses API to retrieve data, so it uses API type names
+					etns = expectedTypeNames
 				}
 				for i, colType := range types {
 					typeName := colType.DatabaseTypeName()
