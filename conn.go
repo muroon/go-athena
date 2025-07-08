@@ -135,7 +135,14 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 	if isCreatingCTASTable(isSelect, resultMode) {
 		// Create AS Select
 		ctasTable = fmt.Sprintf("tmp_ctas_%v", strings.Replace(uuid.NewV4().String(), "-", "", -1))
-		query = fmt.Sprintf("CREATE TABLE %s WITH (format='TEXTFILE') AS %s", ctasTable, query)
+		format := "TEXTFILE"
+		if resultMode == ResultModeParquetDL {
+			format = "PARQUET"
+		}
+
+		// Ensure query has proper column names for CTAS
+		processedQuery := ensureColumnNamesForCTAS(query)
+		query = fmt.Sprintf("CREATE TABLE %s WITH (format='%s') AS %s", ctasTable, format, processedQuery)
 		afterDownload = c.dropCTASTable(ctx, ctasTable)
 	}
 
@@ -163,6 +170,7 @@ func (c *conn) runQuery(ctx context.Context, query string) (driver.Rows, error) 
 	})
 }
 
+// dropCTASTable drops the temporary CTAS table
 func (c *conn) dropCTASTable(ctx context.Context, table string) func() error {
 	return func() error {
 		query := fmt.Sprintf("DROP TABLE %s", table)
@@ -267,7 +275,11 @@ func (c *conn) prepareContext(ctx context.Context, query string) (driver.Stmt, e
 	if isCreatingCTASTable(isSelect, resultMode) {
 		// Create AS Select
 		ctasTable = fmt.Sprintf("tmp_ctas_%v", strings.Replace(uuid.NewV4().String(), "-", "", -1))
-		query = fmt.Sprintf("CREATE TABLE %s WITH (format='TEXTFILE') AS %s", ctasTable, query)
+		format := "TEXTFILE"
+		if resultMode == ResultModeParquetDL {
+			format = "PARQUET"
+		}
+		query = fmt.Sprintf("CREATE TABLE %s WITH (format='%s') AS %s", ctasTable, format, query)
 		afterDownload = c.dropCTASTable(ctx, ctasTable)
 	}
 
@@ -321,14 +333,64 @@ func (c *conn) Exec(query string, args []driver.Value) (driver.Result, error) {
 var _ driver.Queryer = (*conn)(nil)
 var _ driver.Execer = (*conn)(nil)
 
+// ensureColumnNamesForCTAS adds column aliases to SELECT queries that don't have them
+// This is required for CTAS operations in Parquet format
+func ensureColumnNamesForCTAS(query string) string {
+	// Remove leading/trailing whitespace and convert to lowercase for analysis
+	trimmedQuery := strings.TrimSpace(query)
+	lowerQuery := strings.ToLower(trimmedQuery)
+
+	// Handle simple SELECT literal cases like "SELECT 1"
+	if strings.HasPrefix(lowerQuery, "select ") {
+		// Extract the SELECT part
+		selectPart := trimmedQuery[7:] // Remove "SELECT "
+		selectPart = strings.TrimSpace(selectPart)
+
+		// Check if it's a simple literal without alias (like "SELECT 1" or "SELECT 'test'")
+		if isSimpleLiteralWithoutAlias(selectPart) {
+			// Add a column alias
+			return fmt.Sprintf("SELECT %s AS col1", selectPart)
+		}
+	}
+
+	return query
+}
+
+// isSimpleLiteralWithoutAlias checks if the SELECT part is a simple literal without an alias
+func isSimpleLiteralWithoutAlias(selectPart string) bool {
+	// Remove any trailing semicolon
+	selectPart = strings.TrimRight(selectPart, ";")
+	selectPart = strings.TrimSpace(selectPart)
+
+	// Check if it contains "AS" or "as" (indicating it already has an alias)
+	if strings.Contains(strings.ToLower(selectPart), " as ") {
+		return false
+	}
+
+	// Check if it's a simple number like "1"
+	if strings.TrimSpace(selectPart) == "1" {
+		return true
+	}
+
+	// Check if it's a simple string literal
+	if (strings.HasPrefix(selectPart, "'") && strings.HasSuffix(selectPart, "'")) ||
+		(strings.HasPrefix(selectPart, "\"") && strings.HasSuffix(selectPart, "\"")) {
+		return true
+	}
+
+	// Check for other simple literals (functions without aliases, etc.)
+	// For now, be conservative and only handle the most common cases
+	return false
+}
+
 func isCreatingCTASTable(isSelect bool, resultMode ResultMode) bool {
-	return isSelect && resultMode == ResultModeGzipDL
+	return isSelect && (resultMode == ResultModeGzipDL || resultMode == ResultModeParquetDL)
 }
 
 // isValidResultMode checks if the given result mode is valid
 func isValidResultMode(mode ResultMode) bool {
 	switch mode {
-	case ResultModeAPI, ResultModeDL, ResultModeGzipDL:
+	case ResultModeAPI, ResultModeDL, ResultModeGzipDL, ResultModeParquetDL:
 		return true
 	default:
 		return false
